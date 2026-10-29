@@ -8,8 +8,12 @@ headless browser with the operator's own sessions. The application never stores 
 Configure it with `FEED_COLLECTOR_URL` and `FEED_COLLECTOR_TOKEN` (or `feed.collector` in `config.yml`). Without it,
 those subscriptions stay in the status "Collector missing" and never report an empty result as a successful sync.
 
+A ready-made implementation for Bilibili, YouTube, Xiaohongshu and X is [gchust/feed-collector](https://github.com/gchust/feed-collector)
+(private): a Docker image with a dedicated browser you sign in to over noVNC.
+
 Every request carries `Authorization: Bearer <FEED_COLLECTOR_TOKEN>` and a JSON body. Requests time out after
-`feed.collector.timeoutMs` (60 s by default).
+`feed.collector.timeoutMs` (180 s by default: a Collector runs one browser operation at a time, so a request may
+wait in its queue first).
 
 ## `POST /v1/collect`
 

@@ -30,7 +30,7 @@ const feed: AppConfigFactory<FeedConfig> = defineAppConfig({
   env: {
     FEED_COLLECTOR_URL: envString('collector.url', {
       description:
-        'Base URL of the NocoFeed Docker Collector, such as http://collector:8080. Optional.',
+        'Base URL of the NocoFeed Docker Collector, such as http://127.0.0.1:18070. Optional.',
       required: false,
     }),
     FEED_COLLECTOR_TOKEN: envString('collector.token', {
@@ -44,7 +44,7 @@ const feed: AppConfigFactory<FeedConfig> = defineAppConfig({
     }),
   },
   defaults: (): FeedConfig => ({
-    collector: { timeoutMs: 60_000 },
+    collector: { timeoutMs: 180_000 },
     tickMinutes: 5,
     userAgent: 'NocoFeed/1.0 (+https://www.nocobase.com)',
     notificationChannel: 'inbox',

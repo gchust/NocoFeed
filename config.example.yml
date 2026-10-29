@@ -216,9 +216,9 @@ logging:
 feed:
   # FEED_COLLECTOR_URL / FEED_COLLECTOR_TOKEN
   # collector:
-  #   url: http://collector:8080
+  #   url: http://127.0.0.1:18070
   #   token: replace-with-a-long-random-token
-  #   timeoutMs: 60000
+  #   timeoutMs: 180000
   # Minutes between scans for due subscriptions (FEED_TICK_MINUTES); each subscription keeps its own frequency.
   tickMinutes: 5
   # The in-app Channel under notification.channels that receives digests, new replies and subscription problems.
