@@ -64,7 +64,7 @@ Answer:
 - `message` should be a short code, not prose; the interface shows known codes translated and hides anything else.
   Known codes: `collectorBusy`, `loginRequired`, `securityBlock`, `browserUnavailable`, `timeout`, `toolError`,
   `toolMissing`, `invalidTarget`, `notFound`, `upstreamError`, `networkError`, `outputLimit`, `unsupportedOperation`,
-  `unsupportedPart`, `missingUrl`, `invalidResponse`; notes add `noTranscript` and `topLevel:<read>/<total>` (or
+  `unsupportedPart`, `missingUrl`, `invalidResponse`; notes add `noTranscript`, `commentsNotLoaded` and `topLevel:<read>/<total>` (or
   `topLevel:<read>` when the total is unknown).
 - Return items newest first. Set `truncated` when the page was full, so more may lie behind it. NocoFeed drops ids it
   already stores and marks a run `partial` when the page was full (`truncated`, or as many items as `limit`) and no

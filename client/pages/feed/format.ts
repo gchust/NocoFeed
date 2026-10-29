@@ -68,6 +68,7 @@ const NOTE_CODES = new Set([
   'titleOnly',
   'titleOnlyPost',
   'noTranscript',
+  'commentsNotLoaded',
   'needsLogin',
   'blocked',
   'rateLimited',

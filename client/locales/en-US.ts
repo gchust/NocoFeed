@@ -219,6 +219,7 @@ const enUS = {
       titleOnlyPost: 'The post has no text, only a title or link.',
       topLevel: '{{shown}} of {{total}} top-level comments read.',
       noTranscript: 'No subtitles are available.',
+      commentsNotLoaded: 'The page shows comments, but the list did not load.',
       topLevelRead: '{{shown}} top-level comments read.',
       needsLogin: 'The platform requires sign-in.',
       blocked: 'The platform refused the request.',

@@ -207,6 +207,7 @@ const zhCN: AppResource = {
       titleOnlyPost: '帖子没有正文，只有标题或链接。',
       topLevel: '读取了 {{total}} 条顶层评论中的 {{shown}} 条。',
       noTranscript: '没有可用字幕。',
+      commentsNotLoaded: '页面显示有评论，但评论列表没有加载出来。',
       topLevelRead: '读取了 {{shown}} 条顶层评论。',
       needsLogin: '平台要求登录。',
       blocked: '平台拒绝了请求。',
