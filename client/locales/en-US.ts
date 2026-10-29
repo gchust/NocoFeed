@@ -184,6 +184,25 @@ const enUS = {
       missingUrl: 'This item has no link to read from.',
       redditRssFallback:
         'Reddit refused the JSON listing, so the RSS feed was used: no vote or comment counts.',
+      collectorUnauthorized:
+        'The Collector refused the token. Check FEED_COLLECTOR_TOKEN.',
+      collectorBusy: 'The Collector is busy; it will be retried.',
+      loginRequired: 'Sign in to this platform in the Collector browser.',
+      securityBlock:
+        'The platform asked for a security check; handle it in the Collector browser.',
+      browserUnavailable: 'The Collector browser is not ready.',
+      timeout: 'Reading timed out.',
+      toolError: 'The Collector could not read this.',
+      toolMissing: 'The Collector is missing its reading tool.',
+      invalidTarget:
+        'The Collector did not accept this target. Check the keyword, account or link.',
+      notFound: 'The content does not exist or was deleted.',
+      upstreamError: 'The platform returned an error.',
+      networkError: 'The platform could not be reached.',
+      outputLimit: 'The response was too large.',
+      unsupportedOperation: 'The Collector does not support this operation.',
+      unsupportedPart: 'The Collector cannot read this part.',
+      invalidResponse: 'The Collector returned an unrecognised result.',
     },
     notes: {
       commentsNotSupported: 'Comments are not read for this platform.',
@@ -199,6 +218,8 @@ const enUS = {
       titleOnly: 'Only the title was read.',
       titleOnlyPost: 'The post has no text, only a title or link.',
       topLevel: '{{shown}} of {{total}} top-level comments read.',
+      noTranscript: 'No subtitles are available.',
+      topLevelRead: '{{shown}} top-level comments read.',
       needsLogin: 'The platform requires sign-in.',
       blocked: 'The platform refused the request.',
       rateLimited: 'The platform is rate limiting; try later.',
@@ -468,6 +489,7 @@ const enUS = {
       nameRequired: 'Enter a name.',
       candidates: 'Enter a whole number from 1 to 100.',
       targetRequired: 'Enter what to follow.',
+      targetLength: 'Enter {{min}}–{{max}} characters, not starting with “-”.',
       rejected:
         'The platform, target or schedule was not accepted. Check them and try again.',
     },

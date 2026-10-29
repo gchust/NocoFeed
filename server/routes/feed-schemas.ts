@@ -144,6 +144,9 @@ export const FeedCatalogSchema = z
             input: z.enum(['text', 'url', 'none']),
             single: z.boolean(),
             capabilities: z.array(z.string()).readonly(),
+            targetLength: z
+              .object({ min: z.number(), max: z.number() })
+              .nullable(),
             available: z.boolean(),
           }),
         ),

@@ -21,6 +21,8 @@ export interface OperationSpec {
   readonly capabilities: readonly string[];
   /** Enrichment the adapter can perform later on one item. */
   readonly enrich: readonly ('body' | 'comments' | 'transcript')[];
+  /** Length a text target must have, matching what the Collector accepts; it may not start with "-" either. */
+  readonly targetLength?: { readonly min: number; readonly max: number };
 }
 
 export interface PlatformSpec {
@@ -93,6 +95,7 @@ export const CATALOG: readonly PlatformSpec[] = [
       },
       {
         operation: 'keyword',
+        targetLength: { min: 1, max: 100 },
         implementation: 'collector',
         input: 'text',
         capabilities: ['searchCandidates', 'transcriptOnDemand'],
@@ -113,6 +116,7 @@ export const CATALOG: readonly PlatformSpec[] = [
     operations: [
       {
         operation: 'keyword',
+        targetLength: { min: 1, max: 80 },
         implementation: 'collector',
         input: 'text',
         capabilities: ['searchCandidates', 'videoInfo'],
@@ -134,6 +138,7 @@ export const CATALOG: readonly PlatformSpec[] = [
     operations: [
       {
         operation: 'keyword',
+        targetLength: { min: 2, max: 60 },
         implementation: 'collector',
         input: 'text',
         capabilities: ['searchCandidates', 'noteText'],
@@ -156,6 +161,7 @@ export const CATALOG: readonly PlatformSpec[] = [
     operations: [
       {
         operation: 'keyword',
+        targetLength: { min: 1, max: 200 },
         implementation: 'collector',
         input: 'text',
         capabilities: ['searchCandidates', 'threadOnDemand'],
@@ -163,6 +169,7 @@ export const CATALOG: readonly PlatformSpec[] = [
       },
       {
         operation: 'account',
+        targetLength: { min: 1, max: 16 },
         implementation: 'collector',
         input: 'text',
         capabilities: ['accountPosts'],

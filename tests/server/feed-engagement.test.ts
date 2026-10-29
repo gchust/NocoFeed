@@ -340,3 +340,59 @@ test('a subscription that keeps failing is flagged and reported once', async ({
     (await admin.fetch('/feedItems/summary')).json(),
   ).resolves.toMatchObject({ data: { unhealthySources: 1 } });
 });
+
+test('an enrich that reads no comments keeps the stored ones unless the thread is confirmed empty', async ({
+  testApp,
+}) => {
+  const { admin, database } = await setUp(testApp);
+  const id = await seedItem(database, admin.user.id, {
+    externalId: 'enrich-keep',
+    title: 'Thread with comments',
+    url: 'https://news.ycombinator.com/item?id=7',
+  });
+  await database.repository('feedItems').updateOne({
+    filter: { id },
+    values: { comments: [{ text: 'stored', depth: 0 }] },
+  } as never);
+
+  let reply: unknown = {
+    status: 'ok',
+    comments: [],
+    coverage: { comments: { status: 'missing' } },
+  };
+  const service = createFeedService({
+    database,
+    adapters: {
+      collect: vi.fn(),
+      enrich: vi.fn(async () => reply),
+      collectorConfigured: () => false,
+      replyCount: vi.fn(),
+    } as unknown as Adapters,
+    agents: () => undefined,
+    config: () => ({
+      collector: { timeoutMs: 1_000 },
+      tickMinutes: 5,
+      userAgent: 'test',
+      notificationChannel: 'inbox',
+    }),
+    notify: vi.fn(async () => true),
+    log: () => undefined,
+  });
+  const comments = async () =>
+    (
+      (await (await admin.fetch(`/feedItems/${id}`)).json()) as {
+        data: { comments: unknown[] | null };
+      }
+    ).data.comments;
+
+  await service.enrichItem(admin.user.id, id);
+  expect(await comments()).toEqual([{ text: 'stored', depth: 0 }]);
+
+  reply = {
+    status: 'ok',
+    comments: [],
+    coverage: { comments: { status: 'available', note: 'noComments' } },
+  };
+  await service.enrichItem(admin.user.id, id);
+  expect(await comments()).toEqual([]);
+});

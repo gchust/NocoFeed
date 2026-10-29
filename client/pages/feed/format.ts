@@ -35,6 +35,23 @@ const MESSAGE_CODES = new Set([
   'invalidVideo',
   'missingUrl',
   'redditRssFallback',
+  // Collector codes (docs/collector.md).
+  'collectorUnauthorized',
+  'collectorBusy',
+  'loginRequired',
+  'securityBlock',
+  'browserUnavailable',
+  'timeout',
+  'toolError',
+  'toolMissing',
+  'invalidTarget',
+  'notFound',
+  'upstreamError',
+  'networkError',
+  'outputLimit',
+  'unsupportedOperation',
+  'unsupportedPart',
+  'invalidResponse',
 ]);
 
 const NOTE_CODES = new Set([
@@ -50,6 +67,7 @@ const NOTE_CODES = new Set([
   'redditRss',
   'titleOnly',
   'titleOnlyPost',
+  'noTranscript',
   'needsLogin',
   'blocked',
   'rateLimited',
@@ -72,9 +90,12 @@ export function noteText(
   note: string | undefined,
 ): string | undefined {
   if (!note) return undefined;
-  const topLevel = /^topLevel:(\d+)\/(\d+)$/.exec(note);
+  // `topLevel:<read>/<total>`, `topLevel:<read>`, optionally followed by `;…` details that are not shown.
+  const topLevel = /^topLevel:(\d+)(?:\/(\d+))?(?:;.*)?$/.exec(note);
   if (topLevel)
-    return t('feed.notes.topLevel', { shown: topLevel[1], total: topLevel[2] });
+    return topLevel[2]
+      ? t('feed.notes.topLevel', { shown: topLevel[1], total: topLevel[2] })
+      : t('feed.notes.topLevelRead', { shown: topLevel[1] });
   return NOTE_CODES.has(note) ? t(`feed.notes.${note}`) : undefined;
 }
 

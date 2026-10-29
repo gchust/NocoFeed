@@ -101,6 +101,19 @@ test('a person manages their own topics, subscriptions and profile', async ({
   );
   expect(unknown.status).toBe(400);
 
+  // Keyword limits match what the Collector accepts, so a target it would refuse is rejected here.
+  const tooShort = await admin.fetch(
+    '/feedSources',
+    json('POST', {
+      platform: 'xiaohongshu',
+      operation: 'keyword',
+      name: 'Cats',
+      target: '猫',
+      frequency: 60,
+    }),
+  );
+  expect(tooShort.status).toBe(400);
+
   const topic = await admin.fetch(
     '/feedTopics',
     json('POST', {

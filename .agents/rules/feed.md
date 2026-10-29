@@ -17,6 +17,10 @@ the person's topics and experience, and the person keeps their own marks and not
   `client/pages/feed/`. Copy lives in the `feed`, `topics`, `sources`, `runs` and `preferences` locale groups.
 - Configuration: `server/config/feed.ts` (`FEED_COLLECTOR_URL`, `FEED_COLLECTOR_TOKEN`, `FEED_TICK_MINUTES`,
   `notificationChannel`, the in-app Channel notices go to); the Collector contract is `docs/collector.md`.
+- Collector client (`createCollectorClient` in `adapters.ts`): requests use `feed.collector.timeoutMs` instead of the
+  30 s public-platform limit, a `401`/`403` from the Collector is `collectorUnauthorized`, and long external ids are
+  stored as `storedExternalId` hashes. Its tests are `tests/server/feed-collector-client.test.ts`; the reference
+  Collector is the private `gchust/feed-collector`.
 
 ## Engagement
 

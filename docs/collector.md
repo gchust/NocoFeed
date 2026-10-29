@@ -62,8 +62,17 @@ Answer:
 - `status` is one of `ok`, `partial`, `needsLogin`, `blocked`, `rateLimited`, `unsupported`, `failed`. Anything but
   `ok`/`partial` backs the subscription off (6 h for `needsLogin`/`unsupported`, twice the frequency when rate limited).
 - `message` should be a short code, not prose; the interface shows known codes translated and hides anything else.
-- Return items newest first. NocoFeed drops ids it already stores and marks a run `partial` when `truncated` is true and
-  no known item was reached, so it never claims completeness it does not have.
+  Known codes: `collectorBusy`, `loginRequired`, `securityBlock`, `browserUnavailable`, `timeout`, `toolError`,
+  `toolMissing`, `invalidTarget`, `notFound`, `upstreamError`, `networkError`, `outputLimit`, `unsupportedOperation`,
+  `unsupportedPart`, `missingUrl`, `invalidResponse`; notes add `noTranscript` and `topLevel:<read>/<total>` (or
+  `topLevel:<read>` when the total is unknown).
+- Return items newest first. Set `truncated` when the page was full, so more may lie behind it. NocoFeed drops ids it
+  already stores and marks a run `partial` when the page was full (`truncated`, or as many items as `limit`) and no
+  stored item was reached, so it never claims completeness it does not have.
+- Answer HTTP `401`/`403` only for a wrong token; NocoFeed reports that as `unconfigured`/`collectorUnauthorized`, not as
+  a platform sign-in. A platform that needs signing in is `200` with `needsLogin`.
+- Text targets are checked against `targetLength` in `server/providers/feed/catalog.ts` before a subscription is saved;
+  keep those limits equal to what the Collector accepts.
 - Counts that are unknown are **omitted**, never `0`. `coverage` states, per part, what was read (`available`,
   `partial`, `missing`, `unavailable`, `notRequested`, `failed`) and why (`note`). The analysis only reasons about parts
   marked as read.
@@ -83,4 +92,5 @@ Fetches more material for one stored item when the person asks for it.
 
 Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "coverage": {…} } }`
 with only the parts it obtained. A part that could not be fetched is reported in `coverage` with its reason; earlier
-material is kept.
+material is kept. An empty `comments` list replaces stored comments only when `coverage.comments` is `available`
+(the thread was read and has none); report an unreadable post as `failed`/`notFound`, not as an empty thread.

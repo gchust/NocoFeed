@@ -161,6 +161,19 @@ function Body({
       });
       return;
     }
+    const length = operationSpec?.targetLength;
+    if (
+      needsTarget &&
+      length &&
+      (values.target.length < length.min ||
+        values.target.length > length.max ||
+        values.target.startsWith('-'))
+    ) {
+      form.setError('target', {
+        message: t('sources.validation.targetLength', length),
+      });
+      return;
+    }
     const target = needsTarget ? values.target : '';
     try {
       const { data } = await api.request<{ data: Source }>(

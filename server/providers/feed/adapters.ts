@@ -160,7 +160,8 @@ export function createAdapters(config: () => FeedConfig): Adapters {
         return results.reduce<EnrichResult>(
           (merged, next) => ({
             status: merged.status === 'ok' ? next.status : merged.status,
-            message: [merged.message, next.message].filter(Boolean).join(' '),
+            // One code, so the browser can still translate it.
+            message: merged.message || next.message,
             body: next.body ?? merged.body,
             comments: next.comments ?? merged.comments,
             transcript: next.transcript ?? merged.transcript,
@@ -204,7 +205,15 @@ interface Http {
     body: unknown,
     signal: AbortSignal,
     headers?: Record<string, string>,
+    options?: RequestOptions,
   ): Promise<T>;
+}
+
+interface RequestOptions {
+  /** Overrides the 30 s limit for public platforms; the caller's signal still applies. */
+  timeoutMs?: number;
+  /** A 401/403 means this server's own credentials were refused (the Collector token), not a platform sign-in. */
+  service?: boolean;
 }
 
 function createHttp(config: () => FeedConfig): Http {
@@ -212,8 +221,9 @@ function createHttp(config: () => FeedConfig): Http {
     url: string,
     init: RequestInit,
     signal: AbortSignal,
+    options: RequestOptions = {},
   ): Promise<Response> => {
-    const timeout = AbortSignal.timeout(30_000);
+    const timeout = AbortSignal.timeout(options.timeoutMs ?? 30_000);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -230,6 +240,12 @@ function createHttp(config: () => FeedConfig): Http {
         'failed',
         `${new URL(url).host}: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+    if (
+      options.service &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      throw new AdapterError('unconfigured', 'collectorUnauthorized');
     }
     if (response.status === 401 || response.status === 403) {
       throw new AdapterError(
@@ -273,6 +289,7 @@ function createHttp(config: () => FeedConfig): Http {
       body: unknown,
       signal: AbortSignal,
       headers?: Record<string, string>,
+      options?: RequestOptions,
     ) {
       const response = await request(
         url,
@@ -282,6 +299,7 @@ function createHttp(config: () => FeedConfig): Http {
           headers: { 'content-type': 'application/json', ...headers },
         },
         signal,
+        options,
       );
       return (await response.json()) as T;
     },
@@ -642,6 +660,19 @@ function elements(value: unknown): Record<string, unknown>[] {
   );
 }
 
+/** Only http(s) links are stored: a feed or Collector controls this value and it ends up in an `href`. */
+function webLink(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseFeed(source: string): CollectedItem[] {
   const document = xml.parse(source) as unknown;
   const channel = at(document, 'rss', 'channel') ?? at(document, 'rdf:RDF');
@@ -655,7 +686,7 @@ export function parseFeed(source: string): CollectedItem[] {
       const description = htmlToText(textOf(entry.description));
       return {
         externalId: textOf(entry.guid) || link || textOf(entry.title),
-        url: link || undefined,
+        url: webLink(link),
         title: textOf(entry.title) || truncate(description, 120),
         author:
           textOf(entry['dc:creator']) || textOf(entry.author) || undefined,
@@ -693,7 +724,7 @@ export function parseFeed(source: string): CollectedItem[] {
       );
       return {
         externalId: textOf(entry['yt:videoId']) || textOf(entry.id),
-        url: atomLink(entry.link) || undefined,
+        url: webLink(atomLink(entry.link)),
         title: textOf(entry.title),
         author: textOf(at(entry, 'author', 'name')) || undefined,
         summary: summary ? truncate(summary, 600) : undefined,
@@ -924,8 +955,10 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
     const token = config().collector.token;
     return token ? { authorization: `Bearer ${token}` } : {};
   };
-  const signal = (outer: AbortSignal) =>
-    AbortSignal.any([outer, AbortSignal.timeout(config().collector.timeoutMs)]);
+  const options = (): RequestOptions => ({
+    timeoutMs: config().collector.timeoutMs,
+    service: true,
+  });
 
   return {
     async collect(request: CollectRequest): Promise<CollectResult> {
@@ -938,23 +971,33 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
           limit: request.limit,
           cursor: request.cursor,
         },
-        signal(request.signal),
+        request.signal,
         headers(),
+        options(),
       );
-      const items = (response.items ?? []).filter(
+      const listed = (response.items ?? []).filter(
         (item) =>
           item &&
           typeof item.externalId === 'string' &&
-          typeof item.title === 'string' &&
-          !request.knownIds.has(item.externalId),
+          typeof item.title === 'string',
       );
+      const items = listed.filter(
+        (item) => !request.knownIds.has(item.externalId),
+      );
+      // A full page (the Collector says so, or it filled the limit) with nothing seen before may have skipped items
+      // published since the last run; reaching a stored item closes the gap.
+      const fullPageOfNew =
+        request.knownIds.size > 0 &&
+        items.length === listed.length &&
+        (Boolean(response.truncated) || listed.length >= request.limit);
       return {
         status: response.status ?? 'ok',
         message: response.message,
-        truncated: response.truncated,
+        truncated: fullPageOfNew,
         cursor: response.cursor ?? request.cursor,
         items: items.map((item) => ({
           ...item,
+          url: webLink(item.url),
           coverage: item.coverage ?? {
             body: { status: item.body ? 'available' : 'missing' },
             comments: { status: 'notRequested' },
@@ -971,8 +1014,9 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
           url: request.url,
           want: request.want,
         },
-        signal(request.signal),
+        request.signal,
         headers(),
+        options(),
       );
       return {
         status: response.status ?? 'ok',

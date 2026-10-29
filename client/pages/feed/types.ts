@@ -78,6 +78,7 @@ export interface CatalogOperation {
   readonly input: 'text' | 'url' | 'none';
   readonly single: boolean;
   readonly capabilities: readonly string[];
+  readonly targetLength: { readonly min: number; readonly max: number } | null;
   readonly available: boolean;
 }
 

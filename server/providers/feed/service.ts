@@ -19,6 +19,7 @@ import {
 } from './analyzer.js';
 import { CATALOG, findOperation, type Platform } from './catalog.js';
 import { truncate } from './text.js';
+import { createHash } from 'node:crypto';
 import type {
   CollectResult,
   CommentEntry,
@@ -216,6 +217,23 @@ export interface FeedSummary {
   unhealthySources: number;
 }
 
+/**
+ * The id stored for an item. Ids longer than the column (feeds that use a long URL as guid) become a stable hash, so a
+ * later run finds the stored row instead of inserting a truncated duplicate.
+ */
+export function storedExternalId(id: string): string {
+  return id.length <= 191
+    ? id
+    : `sha256:${createHash('sha256').update(id).digest('hex')}`;
+}
+
+/** Stored ids, looked up by the id an adapter sees. */
+class KnownIds extends Set<string> {
+  override has(id: string): boolean {
+    return super.has(storedExternalId(id));
+  }
+}
+
 export interface CatalogEntry {
   platform: Platform;
   experimental: boolean;
@@ -226,6 +244,7 @@ export interface CatalogEntry {
     input: 'text' | 'url' | 'none';
     single: boolean;
     capabilities: readonly string[];
+    targetLength: { min: number; max: number } | null;
     available: boolean;
   }[];
 }
@@ -602,6 +621,14 @@ export function createFeedService(deps: FeedServiceDeps) {
     if (!value) throw new FeedError('invalid', 'targetRequired');
     if (spec.operation.input === 'url' && !/^https?:\/\/\S+$/i.test(value))
       throw new FeedError('invalid', 'targetMustBeUrl');
+    const length = spec.operation.targetLength;
+    if (
+      length &&
+      (value.length < length.min ||
+        value.length > length.max ||
+        value.startsWith('-'))
+    )
+      throw new FeedError('invalid', 'targetLength');
     return value;
   }
 
@@ -855,7 +882,9 @@ export function createFeedService(deps: FeedServiceDeps) {
         .orderBy('id', 'desc')
         .limit(2_000)
         .execute();
-      const knownIds = new Set(knownRows.map((row) => String(row.externalId)));
+      const knownIds = new KnownIds(
+        knownRows.map((row) => String(row.externalId)),
+      );
       const single = findOperation(source.platform, source.operation)?.operation
         .single;
       const firstRun = !source.lastSuccessAt;
@@ -885,11 +914,12 @@ export function createFeedService(deps: FeedServiceDeps) {
       const insertedIds = await database.transaction(async (connection) => {
         const ids: number[] = [];
         for (const item of succeeded ? result.items : []) {
+          const externalId = storedExternalId(item.externalId);
           const exists = await connection.repository('feedItems').findOne({
             filter: {
               ownerId,
               platform: source.platform,
-              externalId: item.externalId,
+              externalId,
             },
             select: (s) => s.fields('id'),
           });
@@ -898,7 +928,7 @@ export function createFeedService(deps: FeedServiceDeps) {
             values: {
               ownerId,
               platform: source.platform,
-              externalId: truncate(item.externalId, 191),
+              externalId,
               sourceId: source.id,
               sourceLabel: truncate(source.name, 200),
               url: item.url ? truncate(item.url, 1000) : null,
@@ -1379,7 +1409,13 @@ export function createFeedService(deps: FeedServiceDeps) {
         filter: { ownerId, id: itemId },
         values: {
           ...(ok && result.body ? { body: truncate(result.body, 20_000) } : {}),
-          ...(ok && result.comments ? { comments: result.comments } : {}),
+          // An empty list replaces stored comments only when the Collector says the thread was read and has none.
+          ...(ok &&
+          result.comments &&
+          (result.comments.length > 0 ||
+            result.coverage.comments?.status === 'available')
+            ? { comments: result.comments }
+            : {}),
           ...(ok && result.transcript ? { transcript: result.transcript } : {}),
           coverage: ok ? { ...coverage, ...result.coverage } : coverage,
           ...(ok
@@ -2066,6 +2102,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           input: op.input,
           single: Boolean(op.single),
           capabilities: op.capabilities,
+          targetLength: op.targetLength ?? null,
           available: op.implementation === 'native' || collector,
         })),
       })),
