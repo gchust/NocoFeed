@@ -9,6 +9,8 @@ const PLATFORM = z.enum([
   'xiaohongshu',
   'x',
 ]);
+const NOISE = z.enum(['none', 'promo', 'routine', 'roundup', 'hype', 'teaser']);
+const GATE = z.enum(['prefilter', 'awaitingMaterial']);
 const MODE = z.enum(['both', 'participate', 'learn']);
 const LOCALE = z.enum(['zh-CN', 'en-US']);
 const PART = z.enum(['body', 'comments', 'transcript']);
@@ -42,7 +44,7 @@ export const SaveProfileBody = z.strictObject({
   interests: z.string().max(2_000),
   expertise: z.string().max(4_000),
   avoid: z.string().max(2_000),
-  dailyLimit: z.number().int().min(0).max(500),
+  dailyLimit: z.number().int().min(0).max(10_000),
   keepLearning: z.boolean(),
   locale: LOCALE.optional(),
   digestEnabled: z.boolean().optional(),
@@ -221,6 +223,9 @@ export const FeedListItemSchema = z
     createdAt: z.string(),
     verdict: z.enum(['discuss', 'learn', 'ignore']).nullable(),
     score: z.number(),
+    quality: z.number().nullable(),
+    noise: NOISE,
+    gate: GATE.nullable(),
     topicId: z.number().int().nullable(),
     lead: z.string().nullable(),
     favorite: z.boolean(),
@@ -308,6 +313,18 @@ export const FeedItemSchema = FeedListItemSchema.extend({
       topicId: z.number().int().nullable(),
       verdict: z.enum(['discuss', 'learn', 'ignore']),
       score: z.number(),
+      quality: z.number().nullable(),
+      qualityDetail: z
+        .object({
+          contentType: z.string(),
+          substance: z.number(),
+          novelty: z.number(),
+          evidence: z.number(),
+          usefulness: z.number(),
+          noise: NOISE,
+        })
+        .nullable(),
+      gate: GATE.nullable(),
       interestLevel: z.string(),
       interestReason: z.string().nullable(),
       experienceLevel: z.string(),

@@ -25,7 +25,7 @@ const enUS = {
   feed: {
     title: 'Feed',
     description:
-      'What your subscriptions brought in, ranked by how well it matches your topics. Each item says what to join or learn, and on which material that judgement rests.',
+      'What your subscriptions brought in, ranked by how well it matches your topics and what it is worth. Each item says what to join or learn, and on which material that judgement rests.',
     refresh: 'Refresh',
     listLabel: 'Items',
     loadMore: 'Load more',
@@ -33,6 +33,19 @@ const enUS = {
     searchPlaceholder: 'Search titles and summaries',
     searchLabel: 'Search the feed',
     scoreValue: 'Match {{score}}',
+    qualityValue: 'Value {{quality}}',
+    noise: {
+      none: '',
+      promo: 'Promotion',
+      routine: 'Routine update',
+      roundup: 'Roundup',
+      hype: 'Little evidence',
+      teaser: 'Teaser',
+    },
+    gate: {
+      prefilter: 'Stopped by the prefilter',
+      awaitingMaterial: 'Waiting for material',
+    },
     views: {
       label: 'Views',
       digest: 'Today',
@@ -278,6 +291,9 @@ const enUS = {
       interest: 'Interest match',
       experience: 'Your experience',
       steps: 'Next steps',
+      quality: 'Content value',
+      qualityAxes:
+        'Substance {{substance}} · New information {{novelty}} · Evidence {{evidence}} · Usefulness {{usefulness}} (out of 10)',
       evidence: 'Based on',
       uncertainty: 'Not certain',
       byModel: 'Analysed by {{model}}',
@@ -602,7 +618,7 @@ const enUS = {
       clear: 'Forget all',
       cleared: 'Learned weights cleared.',
     },
-    validation: { dailyLimit: 'Enter a whole number from 0 to 500.' },
+    validation: { dailyLimit: 'Enter a whole number from 0 to 10000.' },
     saved: 'Preferences saved.',
     savedHint: 'Use “Analyse again” on an item to apply them to it now.',
   },

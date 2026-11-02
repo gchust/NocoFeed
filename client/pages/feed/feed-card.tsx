@@ -81,6 +81,17 @@ function ComfortableCard({
             {t('feed.scoreValue', { score: Math.round(item.score) })}
           </span>
         ) : null}
+        {item.quality !== null ? (
+          <span className='tabular-nums'>
+            {t('feed.qualityValue', { quality: Math.round(item.quality) })}
+          </span>
+        ) : null}
+        {item.noise !== 'none' ? (
+          <span>{t(`feed.noise.${item.noise}`)}</span>
+        ) : null}
+        {item.gate === 'awaitingMaterial' ? (
+          <span>{t('feed.gate.awaitingMaterial')}</span>
+        ) : null}
         {topicName ? <span>#{topicName}</span> : null}
         <StateIcons item={item} className='ml-auto' />
       </span>

@@ -1,5 +1,9 @@
 // The API contract of the NocoFeed endpoints (`server/routes/feed-schemas.ts`), as the pages read it.
 
+export type NoiseKind =
+  'none' | 'promo' | 'routine' | 'roundup' | 'hype' | 'teaser';
+export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
+
 export const PLATFORMS = [
   'reddit',
   'hn',
@@ -130,6 +134,9 @@ export interface FeedListItem {
   readonly createdAt: string;
   readonly verdict: Verdict | null;
   readonly score: number;
+  readonly quality: number | null;
+  readonly noise: NoiseKind;
+  readonly gate: AnalysisGate | null;
   readonly topicId: number | null;
   readonly lead: string | null;
   readonly favorite: boolean;
@@ -174,6 +181,16 @@ export interface Analysis {
   readonly topicId: number | null;
   readonly verdict: Verdict;
   readonly score: number;
+  readonly quality: number | null;
+  readonly qualityDetail: {
+    readonly contentType: string;
+    readonly substance: number;
+    readonly novelty: number;
+    readonly evidence: number;
+    readonly usefulness: number;
+    readonly noise: NoiseKind;
+  } | null;
+  readonly gate: AnalysisGate | null;
   readonly interestLevel: string;
   readonly interestReason: string | null;
   readonly experienceLevel: string;

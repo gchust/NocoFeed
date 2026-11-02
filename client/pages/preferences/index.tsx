@@ -259,7 +259,7 @@ function PreferencesForm({
           .number({ error: t('preferences.validation.dailyLimit') })
           .int(t('preferences.validation.dailyLimit'))
           .min(0, t('preferences.validation.dailyLimit'))
-          .max(500, t('preferences.validation.dailyLimit')),
+          .max(10_000, t('preferences.validation.dailyLimit')),
         keepLearning: z.boolean(),
         digestEnabled: z.boolean(),
         digestHour: z.number().int().min(0).max(23),
@@ -407,7 +407,7 @@ function PreferencesForm({
                     type='number'
                     inputMode='numeric'
                     min={0}
-                    max={500}
+                    max={10_000}
                     value={Number.isNaN(field.value) ? '' : field.value}
                     onChange={(event) =>
                       field.onChange(event.target.valueAsNumber)

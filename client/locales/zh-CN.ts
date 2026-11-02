@@ -20,7 +20,7 @@ const zhCN: AppResource = {
   feed: {
     title: '信息流',
     description:
-      '订阅源带回的内容，按与兴趣主题的匹配度排序。每条都说明适合参与还是学习，以及判断依据的是哪些材料。',
+      '订阅源带回的内容，按匹配度和内容价值排序。每条都说明适合参与还是学习，以及判断依据的是哪些材料。',
     refresh: '刷新',
     listLabel: '内容列表',
     loadMore: '加载更多',
@@ -28,6 +28,19 @@ const zhCN: AppResource = {
     searchPlaceholder: '搜索标题和摘要',
     searchLabel: '搜索信息流',
     scoreValue: '匹配度 {{score}}',
+    qualityValue: '价值 {{quality}}',
+    noise: {
+      none: '',
+      promo: '推广',
+      routine: '例行更新',
+      roundup: '资讯合集',
+      hype: '缺少依据',
+      teaser: '预告',
+    },
+    gate: {
+      prefilter: '预筛未通过',
+      awaitingMaterial: '等待材料',
+    },
     views: {
       digest: '今日简报',
       label: '视图',
@@ -263,6 +276,9 @@ const zhCN: AppResource = {
       interest: '兴趣匹配',
       experience: '你的经验',
       steps: '下一步',
+      quality: '内容价值',
+      qualityAxes:
+        '分量 {{substance}} · 新信息 {{novelty}} · 证据 {{evidence}} · 可用性 {{usefulness}}（满分 10）',
       evidence: '依据',
       uncertainty: '不确定之处',
       byModel: '由 {{model}} 分析',
@@ -567,7 +583,7 @@ const zhCN: AppResource = {
       clear: '全部清除',
       cleared: '已清除学习到的权重。',
     },
-    validation: { dailyLimit: '请输入 0 到 500 之间的整数。' },
+    validation: { dailyLimit: '请输入 0 到 10000 之间的整数。' },
     saved: '偏好已保存。',
     savedHint: '在内容上点「重新分析」即可立即应用。',
   },

@@ -1,0 +1,3 @@
+{"caseId":"example-keep","label":"keep","split":"development","item":{"platform":"hn","title":"How we cut our Postgres backup restore time from 4 h to 12 min","summary":"Measurements and the pgBackRest settings we changed.","body":null}}
+{"caseId":"example-drop","label":"drop","split":"development","item":{"platform":"bilibili","title":"限时五折：七天学会低代码，名额有限","summary":"立即报名课程。","body":null}}
+{"caseId":"example-either","label":"either","split":"holdout","item":{"platform":"x","title":"Our team moved to a low-code tool last quarter","summary":"It went fine, overall.","body":null}}

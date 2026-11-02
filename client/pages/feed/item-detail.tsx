@@ -364,6 +364,18 @@ export function ItemDetail({
               {t('feed.scoreValue', { score: Math.round(analysis.score) })}
             </span>
           ) : null}
+          {analysis?.quality != null ? (
+            <span className='text-xs text-muted-foreground tabular-nums'>
+              {t('feed.qualityValue', {
+                quality: Math.round(analysis.quality),
+              })}
+            </span>
+          ) : null}
+          {analysis?.gate ? (
+            <span className='text-xs text-muted-foreground'>
+              {t(`feed.gate.${analysis.gate}`)}
+            </span>
+          ) : null}
           {topicName ? (
             <span className='text-xs text-muted-foreground'>#{topicName}</span>
           ) : null}
@@ -441,6 +453,14 @@ export function ItemDetail({
                   ))}
                 </ol>
               </div>
+            ) : null}
+            {analysis.qualityDetail ? (
+              <TextBlock label={t('feed.detail.quality')}>
+                {t('feed.detail.qualityAxes', analysis.qualityDetail)}
+                {analysis.qualityDetail.noise !== 'none'
+                  ? ` · ${t(`feed.noise.${analysis.qualityDetail.noise}`)}`
+                  : ''}
+              </TextBlock>
             ) : null}
             {analysis.evidence ? (
               <TextBlock label={t('feed.detail.evidence')}>

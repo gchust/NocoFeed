@@ -5,18 +5,29 @@ import type { FeedConfig } from '../../config/feed.js';
 import { followableUrl, type Adapters } from './adapters.js';
 import {
   analyzeWithRules,
+  awaitingMaterial,
+  blockedByPrefilter,
+  buildPrefilterPrompt,
   buildPrompt,
+  hasOnlyTitle,
+  limitedToTitle,
+  needsPrefilter,
+  parsePrefilterAnswer,
   localeFor,
   matchTopics,
   parseModelAnswer,
   TERM_WEIGHT_MAX,
   TERM_WEIGHT_MIN,
   type AnalysisDraft,
+  type AnalysisGate,
   type AnalysisItem,
   type AnalysisProfile,
   type AnalysisTopic,
   type Locale,
+  type NoiseKind,
+  type QualityDetail,
 } from './analyzer.js';
+import type { GoldCase } from './evaluation.js';
 import { CATALOG, findOperation, type Platform } from './catalog.js';
 import { truncate } from './text.js';
 import { createHash } from 'node:crypto';
@@ -135,6 +146,9 @@ export interface Analysis {
   topicId: number | null;
   verdict: 'discuss' | 'learn' | 'ignore';
   score: number;
+  quality: number | null;
+  qualityDetail: QualityDetail | null;
+  gate: AnalysisGate | null;
   interestLevel: string;
   interestReason: string | null;
   experienceLevel: string;
@@ -160,6 +174,9 @@ export interface FeedListItem {
   createdAt: string;
   verdict: Analysis['verdict'] | null;
   score: number;
+  quality: number | null;
+  noise: NoiseKind;
+  gate: AnalysisGate | null;
   topicId: number | null;
   lead: string | null;
   favorite: boolean;
@@ -314,6 +331,16 @@ const QUIET_MINUTES = 3 * 24 * 60;
 /** A followed thread is checked for two weeks after the person posted. */
 const FOLLOW_UP_DAYS = 14;
 /** How many recent rule-based analyses are scored again when feedback changes a weight. */
+/**
+ * Output limits for model calls. Reasoning models spend these on thinking before the answer begins, and an answer cut
+ * off that way is empty, so they are far above what the JSON itself needs.
+ */
+const ANALYSIS_TOKENS = 4_000;
+const PREFILTER_TOKENS = 3_000;
+/** Model analyses per person per day until they choose otherwise. */
+const DEFAULT_DAILY_LIMIT = 1_000;
+/** Items asked about in one prefilter call. */
+const PREFILTER_BATCH = 20;
 const RESCORE_LIMIT = 200;
 /** Statuses that a person has to fix in configuration, already shown on the subscription; not counted as failures. */
 const SETUP_STATUSES = new Set(['unconfigured', 'unsupported']);
@@ -410,7 +437,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       interests: text(row?.interests),
       expertise: text(row?.expertise),
       avoid: text(row?.avoid),
-      dailyLimit: Number(row?.dailyLimit ?? 20),
+      dailyLimit: Number(row?.dailyLimit ?? DEFAULT_DAILY_LIMIT),
       keepLearning: row ? bool(row.keepLearning) : true,
       locale: (row?.locale as Locale | null) ?? null,
       configured: Boolean(row),
@@ -469,7 +496,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       filter: { ownerId },
       create: {
         ownerId,
-        dailyLimit: 20,
+        dailyLimit: DEFAULT_DAILY_LIMIT,
         keepLearning: true,
         locale,
         updatedAt: new Date(),
@@ -1198,6 +1225,13 @@ export function createFeedService(deps: FeedServiceDeps) {
     coverage: json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE),
   });
 
+  const limitedToTitleIfBare = (
+    item: AnalysisItem,
+    draft: AnalysisDraft,
+    profile: Profile,
+    locale: Locale,
+  ) => (hasOnlyTitle(item) ? limitedToTitle(draft, profile, locale) : draft);
+
   async function analyzeOne(
     ownerId: string,
     row: Row,
@@ -1216,21 +1250,30 @@ export function createFeedService(deps: FeedServiceDeps) {
         locale,
       );
       try {
-        const answer = await deps.agents()!.models.gateway.generate({
-          model: choice.ref,
-          system,
-          prompt,
-          maxOutputTokens: 1_200,
-          source: 'nocofeed.analysis',
-          signal: AbortSignal.timeout(90_000),
-        });
-        return parseModelAnswer(
-          answer.text,
-          topics,
-          item,
-          locale,
-          `${choice.ref.modelService}/${choice.ref.model}`,
-        );
+        const ask = () =>
+          deps.agents()!.models.gateway.generate({
+            model: choice.ref,
+            system,
+            prompt,
+            maxOutputTokens: ANALYSIS_TOKENS,
+            source: 'nocofeed.analysis',
+            signal: AbortSignal.timeout(90_000),
+          });
+        const parse = (text: string) =>
+          parseModelAnswer(
+            text,
+            topics,
+            item,
+            locale,
+            `${choice.ref.modelService}/${choice.ref.model}`,
+          );
+        const answer = await ask();
+        try {
+          return parse(answer.text);
+        } catch {
+          // Answers vary between calls and a cut-off one is common, so one more is cheaper than losing the analysis.
+          return parse((await ask()).text);
+        }
       } catch (error) {
         deps.log('warn', 'model analysis failed; using rules', {
           itemId: row.id,
@@ -1246,6 +1289,47 @@ export function createFeedService(deps: FeedServiceDeps) {
       draft.uncertainty = `${draft.uncertainty} ${locale === 'zh-CN' ? '今日模型分析额度已用完。' : "Today's model analysis budget is used up."}`;
     }
     return draft;
+  }
+
+  /**
+   * Which rows to leave out of the full analysis, asked in batches. Rows with a keyword match do not ask. It fails open:
+   * a call that fails or answers nonsense stops nothing. Does not count against `dailyLimit`, which counts analyses.
+   */
+  async function prefilter(
+    ownerId: string,
+    rows: Row[],
+    topics: AnalysisTopic[],
+    profile: Profile,
+  ): Promise<Set<number>> {
+    const blocked = new Set<number>();
+    const choice = await modelChoice(ownerId, profile);
+    if (!choice.ref) return blocked;
+    const asked = rows.filter((row) =>
+      needsPrefilter(toAnalysisItem(row), topics, profile),
+    );
+    for (let start = 0; start < asked.length; start += PREFILTER_BATCH) {
+      const batch = asked.slice(start, start + PREFILTER_BATCH);
+      const items = batch.map(toAnalysisItem);
+      const { system, prompt } = buildPrefilterPrompt(items, topics, profile);
+      try {
+        const answer = await deps.agents()!.models.gateway.generate({
+          model: choice.ref,
+          system,
+          prompt,
+          maxOutputTokens: PREFILTER_TOKENS,
+          source: 'nocofeed.prefilter',
+          signal: AbortSignal.timeout(60_000),
+        });
+        for (const index of parsePrefilterAnswer(answer.text, batch.length))
+          blocked.add(Number(batch[index].id));
+      } catch (error) {
+        deps.log('warn', 'prefilter failed; analysing the batch', {
+          ownerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return blocked;
   }
 
   async function topicsFor(
@@ -1266,16 +1350,25 @@ export function createFeedService(deps: FeedServiceDeps) {
     }));
   }
 
-  /** Writes a new current analysis per item; earlier versions stay as history. Returns how many were analysed. */
+  /**
+   * Writes a new current analysis per item; earlier versions stay as history. Returns how many were analysed. `asked`
+   * means the person asked for this item, so neither gate applies: they have seen it and want the model's view.
+   */
   async function analyzeItems(
     ownerId: string,
     itemIds: number[],
     sourceId: number | null,
+    { asked = false }: { asked?: boolean } = {},
   ): Promise<number> {
     if (!itemIds.length) return 0;
-    const [profile, topics] = await Promise.all([
+    const [profile, topics, source] = await Promise.all([
       getProfile(ownerId),
       topicsFor(ownerId, sourceId),
+      sourceId == null
+        ? null
+        : (repo('feedSources').findOne({
+            filter: { ownerId, id: sourceId },
+          }) as Promise<Row | null>),
     ]);
     const rows = await database
       .query()
@@ -1284,13 +1377,49 @@ export function createFeedService(deps: FeedServiceDeps) {
       .where('ownerId', '=', ownerId)
       .where('id', 'in', itemIds)
       .execute<Row>();
+    // A bare title waits only where fetching more is possible; elsewhere nothing would ever release it.
+    const awaits = (row: Row) =>
+      !asked &&
+      hasOnlyTitle(toAnalysisItem(row)) &&
+      enrichableFor(
+        String(row.platform),
+        source ? String(source.operation) : null,
+      ).length > 0;
+    const blocked = asked
+      ? new Set<number>()
+      : await prefilter(
+          ownerId,
+          rows.filter((row) => !awaits(row)),
+          topics,
+          profile,
+        );
     let count = 0;
     for (const row of rows) {
       const locale = localeFor(
         profile.locale,
         `${profile.interests}${text(row.title)}`,
       );
-      const draft = await analyzeOne(ownerId, row, topics, profile, locale);
+      const item = toAnalysisItem(row);
+      let draft: AnalysisDraft;
+      if (awaits(row))
+        draft = awaitingMaterial(
+          analyzeWithRules(item, topics, profile, locale),
+          profile,
+          locale,
+        );
+      else if (blocked.has(Number(row.id)))
+        draft = blockedByPrefilter(
+          analyzeWithRules(item, topics, profile, locale),
+          locale,
+        );
+      else {
+        draft = limitedToTitleIfBare(
+          item,
+          await analyzeOne(ownerId, row, topics, profile, locale),
+          profile,
+          locale,
+        );
+      }
       await writeAnalysis(ownerId, row, draft);
       count += 1;
     }
@@ -1342,6 +1471,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         ownerId,
         [itemId],
         row.sourceId == null ? null : Number(row.sourceId),
+        { asked: true },
       );
       await finishRun(runId, { status: 'succeeded', found: 1, analyzed });
     } catch (error) {
@@ -1437,6 +1567,17 @@ export function createFeedService(deps: FeedServiceDeps) {
       } as never);
     });
     if (!ok) throw new FeedError('unavailable', result.status);
+    // An item waiting for material has had no real analysis yet, so this is the analysis it was waiting for rather than
+    // a rewrite; any other analysis is left to go stale until the person asks again.
+    const current = (await repo('feedAnalyses').findOne({
+      filter: { itemId, current: true },
+    })) as Row | null;
+    if (current?.gate === 'awaitingMaterial')
+      await analyzeItems(
+        ownerId,
+        [itemId],
+        row.sourceId == null ? null : Number(row.sourceId),
+      );
     return getItem(ownerId, itemId);
   }
 
@@ -1504,6 +1645,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     topicId: row.topicId == null ? null : Number(row.topicId),
     verdict: row.verdict as Analysis['verdict'],
     score: Number(row.score ?? 0),
+    quality: row.quality == null ? null : Number(row.quality),
+    qualityDetail: json<QualityDetail | null>(row.qualityDetail, null),
+    gate: (row.gate as AnalysisGate | null) ?? null,
     interestLevel: String(row.interestLevel),
     interestReason: (row.interestReason as string | null) ?? null,
     experienceLevel: String(row.experienceLevel),
@@ -1554,6 +1698,11 @@ export function createFeedService(deps: FeedServiceDeps) {
     createdAt: iso(row.createdAt) ?? '',
     verdict: (analysis?.verdict as FeedListItem['verdict']) ?? null,
     score: Number(analysis?.score ?? 0),
+    quality: analysis?.quality == null ? null : Number(analysis.quality),
+    noise:
+      json<QualityDetail | null>(analysis?.qualityDetail, null)?.noise ??
+      'none',
+    gate: (analysis?.gate as AnalysisGate | null) ?? null,
     topicId: analysis?.topicId == null ? null : Number(analysis.topicId),
     lead: (analysis?.lead as string | null) ?? null,
     favorite: bool(state?.favorite),
@@ -1594,7 +1743,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       .leftJoin('feedItemStates as s', (join) =>
         join.onRef('s.itemId', '=', 'i.id').on('s.ownerId', '=', ownerId),
       )
-      .select(['i.id as id', 'a.score as score'])
+      .select(['i.id as id', 'a.priority as priority'])
       .where('i.ownerId', '=', ownerId);
 
     switch (query.view) {
@@ -1634,7 +1783,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       );
     }
     const page = await builder
-      .orderBy('a.score', 'desc')
+      .orderBy('a.priority', 'desc')
       .orderBy('i.id', 'desc')
       .limit(query.pageSize + 1)
       .offset(offset)
@@ -1662,7 +1811,16 @@ export function createFeedService(deps: FeedServiceDeps) {
       database
         .query()
         .selectFrom('feedAnalyses')
-        .select(['itemId', 'verdict', 'score', 'topicId', 'lead'])
+        .select([
+          'itemId',
+          'verdict',
+          'score',
+          'quality',
+          'qualityDetail',
+          'gate',
+          'topicId',
+          'lead',
+        ])
         .where('ownerId', '=', ownerId)
         .where('itemId', 'in', ids)
         .where('current', '=', true)
@@ -1893,7 +2051,11 @@ export function createFeedService(deps: FeedServiceDeps) {
         join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
       )
       .selectAll('i')
-      .select(['a.score as currentScore', 'a.verdict as currentVerdict'])
+      .select([
+        'a.score as currentScore',
+        'a.verdict as currentVerdict',
+        'a.gate as currentGate',
+      ])
       .where('i.ownerId', '=', ownerId)
       .where('a.engine', '=', 'rules')
       .orderBy('i.id', 'desc')
@@ -1920,7 +2082,12 @@ export function createFeedService(deps: FeedServiceDeps) {
         profile.locale,
         `${profile.interests}${text(row.title)}`,
       );
-      const draft = analyzeWithRules(analysisItem, topics, profile, locale);
+      const rescored = analyzeWithRules(analysisItem, topics, profile, locale);
+      // Still waiting: enriching it must still find it waiting.
+      const draft =
+        row.currentGate === 'awaitingMaterial'
+          ? awaitingMaterial(rescored, profile, locale)
+          : rescored;
       if (
         draft.score === Number(row.currentScore) &&
         draft.verdict === row.currentVerdict
@@ -1930,6 +2097,77 @@ export function createFeedService(deps: FeedServiceDeps) {
       count += 1;
     }
     return count;
+  }
+
+  /** Everyone with items, for commands that act on one person's feed. */
+  async function itemOwners(): Promise<string[]> {
+    const rows = await database
+      .query()
+      .selectFrom('feedItems')
+      .select('ownerId')
+      .distinct()
+      .execute<Row>();
+    return rows.map((row) => String(row.ownerId));
+  }
+
+  /** The person's "Useful" and "Not relevant" feedback, as cases for `feed evaluate`. */
+  async function labelledCases(ownerId: string): Promise<GoldCase[]> {
+    const rows = await database
+      .query()
+      .selectFrom('feedItems as i')
+      .innerJoin('feedItemStates as s', 's.itemId', 'i.id')
+      .selectAll('i')
+      .select('s.feedback as feedback')
+      .where('i.ownerId', '=', ownerId)
+      .where('s.feedback', 'is not', null)
+      .orderBy('i.id', 'asc')
+      .execute<Row>();
+    return rows.map((row) => ({
+      caseId: `item-${String(row.id)}`,
+      label: row.feedback === 'helpful' ? 'keep' : 'drop',
+      item: toAnalysisItem(row),
+    }));
+  }
+
+  /**
+   * What the feed would do with an item, with the keyword rules beside it, writing nothing. The gate for fetching more
+   * is left out because a case has no subscription to fetch through.
+   */
+  async function judgeCase(ownerId: string, item: AnalysisItem) {
+    const [profile, topics] = await Promise.all([
+      getProfile(ownerId),
+      topicsFor(ownerId, null),
+    ]);
+    const locale = localeFor(
+      profile.locale,
+      `${profile.interests}${item.title}`,
+    );
+    const row = {
+      id: 0,
+      ...item,
+      comments: item.comments ?? null,
+      transcript: item.transcript ?? null,
+    } as Row;
+    const blocked = await prefilter(ownerId, [row], topics, profile);
+    const rules = analyzeWithRules(item, topics, profile, locale);
+    const draft = blocked.size
+      ? blockedByPrefilter(rules, locale)
+      : limitedToTitleIfBare(
+          item,
+          await analyzeOne(ownerId, row, topics, profile, locale),
+          profile,
+          locale,
+        );
+    const verdictOf = (entry: AnalysisDraft) => ({
+      kept: entry.verdict !== 'ignore',
+      verdict: entry.verdict,
+      priority: entry.priority,
+      quality: entry.quality,
+      noise: entry.qualityDetail?.noise ?? null,
+      gate: entry.gate,
+      engine: entry.engine,
+    });
+    return { model: verdictOf(draft), rules: verdictOf(rules) };
   }
 
   /** The daily digest: the best discussions and the best learning item collected in the last 24 hours. */
@@ -2129,6 +2367,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     updateState,
     enrichItem,
     reanalyzeItem,
+    itemOwners,
+    labelledCases,
+    judgeCase,
     summary,
     digest,
     sendDigests,

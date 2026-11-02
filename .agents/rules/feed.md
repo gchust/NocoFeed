@@ -6,7 +6,7 @@ the person's topics and experience, and the person keeps their own marks and not
 ## Where it lives
 
 - Schema: `database/main/migrations/202610280001_create_feed.ts` (seven `feed*` tables, all scoped by `ownerId`) and
-  `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
+  `202611020003_feed_analysis_quality.ts` (quality, priority, gates), `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -54,6 +54,13 @@ the person's topics and experience, and the person keeps their own marks and not
 - The model comes from the agents plugin's default chat model (System settings → AI models) and is capped per person per
   day by `dailyLimit`; beyond it, or without a model, the keyword rules in `analyzer.ts` answer. Bump `RULES_VERSION` or
   `PROMPT_VERSION` when their output changes.
+- Filtering has three stages. A keyword miss goes to a batched **prefilter** that only stops what the text shows to be
+  unrelated and fails open; it does not count against `dailyLimit`. A **bare title** with something left to fetch gets the
+  rules and `gate: awaitingMaterial`, and enriching it runs the analysis it was waiting for. The **full analysis** rates
+  relevance (`score`) and worth (`quality`) apart: the server computes `quality` from the model's axes and caps it by
+  noise kind, and the feed sorts by `priority` (`priorityOf`). "Analyze again" bypasses both gates. Rule analyses have no
+  quality and rank at `NEUTRAL_QUALITY`.
+- Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
 - Reddit refuses the JSON listing from most servers; the adapter falls back to the RSS feed and says so
   (`redditRssFallback`).
 
