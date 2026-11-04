@@ -11,6 +11,7 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611050001_feed_runner_agent.ts` (`feedProfiles.readerAgentId`, `feedRuns.agentRunId`/`agentResult`).
   `202611060001_feed_item_media.ts` (`feedItems.media`: images and video links, see "The post first" below).
   `202611070001_feed_time_window.ts` (`feedProfiles.maxAgeDays`, `feedItems.timelineAt`).
+  `202611080001_feed_run_window.ts` (`feedRuns.windowFilter`/`windowScanned`: how the Collector applied the window).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -90,11 +91,17 @@ the person's topics and experience, and the person keeps their own marks and not
 - `since` goes to the adapters (`CollectRequest.since`); the Collector narrows platform searches with it (see
   `docs/collector.md`), native lists are already newest first. `withinWindow` then drops every item published before
   the cutoff (undated items stay) and, when it dropped one, clears `truncated`: the list reached past the window.
+- The Collector may say how it applied `since` (`CollectResult.window`, `collectWindowOf` in `adapters.ts`):
+  `platform` or `local` (the platform could not search by date, e.g. Xiaohongshu's AI search page; it read
+  `scanned` results and kept the dated ones inside the window). `runSource` stores it on the run, and `toRun` adds
+  `windowShort` (a first run filtered locally found fewer than `candidateLimit`); the runs page shows both and links
+  to Preferences to widen the window. Unknown or absent values are null.
 - An item already stored (`ownerId`, `platform`, `externalId`) is never inserted or analysed again; only the run's new
   ids go to `analyzeItems`.
 - `feedItems.timelineAt` is `publishedAt`, else the collection time; every insert sets it. The feed's `sort=newest` and
   `period` (`day`/`week`/`month`, also on `/feedItems/summary`) use it, because the query builder has no `COALESCE`.
-- Tests: `tests/server/feed-time-window.test.ts`, `tests/database/feed-time-window-migration.test.ts`, the `since`
+- Tests: `tests/server/feed-time-window.test.ts`, `tests/database/feed-time-window-migration.test.ts`,
+  `tests/database/feed-run-window-migration.test.ts`, `tests/client/runs-page.test.tsx`, the `since` and `window`
   cases in `feed-collector-client.test.ts`.
 
 ## Rules that keep it honest

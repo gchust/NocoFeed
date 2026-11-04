@@ -132,6 +132,11 @@ export interface Run {
   readonly analyzed: number;
   readonly coverage: string | null;
   readonly error: string | null;
+  /** How the time window was applied: by the platform, or only by date here after reading `windowScanned`. */
+  readonly windowFilter?: 'platform' | 'local' | null;
+  readonly windowScanned?: number | null;
+  /** A first run filtered locally found fewer items than asked for: a wider window would bring more. */
+  readonly windowShort?: boolean;
   readonly startedAt: string;
   readonly finishedAt: string | null;
 }

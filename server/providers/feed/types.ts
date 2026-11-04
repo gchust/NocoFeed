@@ -94,6 +94,17 @@ export interface CollectResult {
   /** The result hit the adapter's or the upstream's limit. */
   truncated?: boolean;
   cursor?: Record<string, unknown> | null;
+  /** How the Collector applied `since`, when it says (see `CollectWindow`). */
+  window?: CollectWindow;
+}
+
+/**
+ * How a Collector applied the time window: `platform` when the platform's own sort or date filter did it, `local`
+ * when the platform could not and the Collector read `scanned` items to keep those published inside the window.
+ */
+export interface CollectWindow {
+  filter: 'platform' | 'local';
+  scanned?: number;
 }
 
 export interface CollectRequest {

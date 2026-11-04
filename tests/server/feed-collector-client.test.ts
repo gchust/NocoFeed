@@ -292,6 +292,40 @@ describe('Collector time window', () => {
     ]);
   });
 
+  it('passes on how the Collector applied the window, and ignores what it does not understand', async () => {
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        items: items('a'),
+        window: { filter: 'local', scanned: 100 },
+      },
+    });
+    expect((await collectSince()).window).toEqual({
+      filter: 'local',
+      scanned: 100,
+    });
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        items: items('a'),
+        window: { filter: 'platform', scanned: -1 },
+      },
+    });
+    expect((await collectSince()).window).toEqual({ filter: 'platform' });
+    for (const window of [{ filter: 'somehow' }, 'local', null]) {
+      answer = () => ({
+        status: 200,
+        body: { status: 'ok', items: items('a'), window },
+      });
+      expect((await collectSince()).window).toBeUndefined();
+    }
+    // An older Collector says nothing: the result is what it always was.
+    answer = () => ({ status: 200, body: { status: 'ok', items: items('a') } });
+    expect('window' in (await collectSince())).toBe(false);
+  });
+
   it('does not retry other refusals', async () => {
     answer = () => ({ status: 500, body: { error: 'boom' } });
     expect((await collectSince()).status).toBe('failed');

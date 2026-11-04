@@ -196,6 +196,28 @@ export default function RunsPage(): ReactElement {
                     </TableCell>
                     <TableCell className='max-w-[16rem] text-xs whitespace-normal'>
                       {run.coverage ? t(`runs.coverage.${run.coverage}`) : '—'}
+                      {run.windowFilter ? (
+                        <p className='mt-1 text-muted-foreground'>
+                          {run.windowFilter === 'local'
+                            ? run.windowScanned != null
+                              ? t('runs.window.localScanned', {
+                                  count: run.windowScanned,
+                                })
+                              : t('runs.window.local')
+                            : t('runs.window.platform')}
+                        </p>
+                      ) : null}
+                      {run.windowShort ? (
+                        <p className='mt-1 text-muted-foreground'>
+                          {t('runs.window.short')}{' '}
+                          <Link
+                            to='/preferences'
+                            className='text-primary hover:underline'
+                          >
+                            {t('runs.window.widen')}
+                          </Link>
+                        </p>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );

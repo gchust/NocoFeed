@@ -240,6 +240,15 @@ export const FeedRunSchema = z
         'baseline, complete, partial or single; null when the run did not succeed',
     }),
     error: z.string().nullable(),
+    windowFilter: z.enum(['platform', 'local']).nullable().meta({
+      description:
+        'How the time window was applied: platform (the platform searched by date) or local (it could not; the Collector read windowScanned results and kept those published inside the window); null when unknown',
+    }),
+    windowScanned: z.number().int().nullable(),
+    windowShort: z.boolean().meta({
+      description:
+        'A first run filtered locally found fewer items than the subscription asks for; widening the time window would bring more',
+    }),
     startedAt: z.string(),
     finishedAt: z.string().nullable(),
   })
