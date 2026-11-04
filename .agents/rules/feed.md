@@ -74,6 +74,24 @@ the person's topics and experience, and the person keeps their own marks and not
 - `UpdateTopicBody` has no defaults on purpose: Zod's `.partial()` still applies `.default()`, which would reset an
   omitted field.
 
+## Recommended subscriptions
+
+- `/sources/recommended` (`client/pages/sources/recommended.tsx`, opened from "Browse recommended" on the subscriptions
+  page, its empty state and the create form) lists `SOURCE_PRESETS` from `client/pages/sources/presets.ts` by category
+  with a search over name, target and the translated description. "Subscribe" is the ordinary `POST /feedSources`
+  (same server validation); a preset whose `presetKey` (platform, operation, normalized target) matches a direct
+  subscription shows "Added".
+- It is static client data, not a seed: nothing is written until the person subscribes. Descriptions and category names
+  are in `sources.presets` in both locales; `name` is the publisher's own name. Only list operations that are
+  subscriptions appear (RSS, Reddit, HN, YouTube channels by `UC…` id, X accounts); Bilibili and Xiaohongshu only
+  search, which belongs to topics. The list is NocoFeed's own, built from each publisher's feed address; it took the
+  category idea, not data, from horizon1123.top (whose robots.txt reserves AI use). Check new feed addresses with one
+  request each before adding them.
+- `resolveChannelId` reads a handle page's own channel (canonical link, `externalId`, `itemprop="identifier"`) before
+  any `"channelId"`, which is often a recommended channel.
+- Tests: `tests/client/source-presets.test.ts` (catalog support, target forms, duplicates, both locales, filtering,
+  "Added"), `tests/client/sources-recommended.test.tsx` (the dialog) and `tests/server/feed-youtube-channel.test.ts`.
+
 ## The post first
 
 - **Text and media are fetched, not only titles.** An operation with `prefetch` in `catalog.ts` (Xiaohongshu search,

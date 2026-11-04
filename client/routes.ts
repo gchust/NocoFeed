@@ -74,6 +74,11 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         path: ':sourceId/edit',
         componentLoader: () => import('./pages/sources/form.js'),
       },
+      {
+        name: 'sourceRecommended',
+        path: 'recommended',
+        componentLoader: () => import('./pages/sources/recommended.js'),
+      },
     ],
   },
   {
