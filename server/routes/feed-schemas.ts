@@ -328,7 +328,14 @@ export const FeedListItemSchema = z
     title: z.string(),
     summary: z.string().nullable(),
     url: z.string().nullable(),
-    publishedAt: z.string().nullable(),
+    publishedAt: z.string().nullable().meta({
+      description:
+        'When the item was published; null when the platform gave no time (createdAt is then when it was collected).',
+    }),
+    publishedApproximate: z.boolean().meta({
+      description:
+        'publishedAt was worked out from relative text such as "3 weeks ago" and is only roughly right.',
+    }),
     createdAt: z.string(),
     verdict: z.enum(['discuss', 'learn', 'ignore']).nullable(),
     score: z.number(),

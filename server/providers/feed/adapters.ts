@@ -156,6 +156,13 @@ export function createAdapters(config: () => FeedConfig): Adapters {
             await collector.enrich({ ...request, want: ['transcript'] }),
           );
         }
+        // YouTube search gives only "3 weeks ago"; the Collector reads the exact time from the video page.
+        if (
+          request.want.includes('published') &&
+          request.platform === 'youtube'
+        ) {
+          results.push(await collector.published(request));
+        }
         if (!results.length) {
           return { status: 'unsupported', coverage: {} };
         }
@@ -168,6 +175,7 @@ export function createAdapters(config: () => FeedConfig): Adapters {
             comments: next.comments ?? merged.comments,
             transcript: next.transcript ?? merged.transcript,
             media: next.media ?? merged.media,
+            publishedAt: next.publishedAt ?? merged.publishedAt,
             coverage: { ...merged.coverage, ...next.coverage },
           }),
           { status: 'ok', coverage: {} },
@@ -942,6 +950,15 @@ async function collectBilibiliVideo(
 
 /** How long a Collector that refused `since` is asked without it before trying again (it may have been upgraded). */
 const SINCE_RETRY_MS = 60 * 60_000;
+/** How long a Collector that refused `want: ["published"]` is left alone before it is asked again. */
+const PUBLISHED_RETRY_MS = 6 * 60 * 60_000;
+
+/** An ISO instant from a Collector, or undefined for anything that is not one. */
+function collectorInstant(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 40) return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
 
 interface CollectorResponse {
   status?: CollectResult['status'];
@@ -980,6 +997,8 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
   // A Collector older than the time window refuses `since` as an unknown field (400). It is then asked without it
   // for a while, and NocoFeed applies the window to what comes back.
   let sinceRefusedUntil = 0;
+  // A Collector older than exact publication times refuses `published` as an unknown part (400).
+  let publishedRefusedUntil = 0;
 
   return {
     async collect(request: CollectRequest): Promise<CollectResult> {
@@ -1041,6 +1060,13 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         ...(applied ? { window: applied } : {}),
         items: items.map((item) => ({
           ...item,
+          publishedAt: collectorInstant(item.publishedAt),
+          // Only together with a time; anything but `true` means the time is exact.
+          publishedAtApproximate:
+            collectorInstant(item.publishedAt) &&
+            item.publishedAtApproximate === true
+              ? true
+              : undefined,
           url: webLink(item.url),
           media: cleanMedia(item.media),
           coverage: item.coverage ?? {
@@ -1068,8 +1094,37 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         message: response.message,
         ...(response.item ?? { coverage: {} }),
         media: cleanMedia(response.item?.media),
+        publishedAt: collectorInstant(response.item?.publishedAt),
         coverage: response.item?.coverage ?? {},
       };
+    },
+    /** The exact publication time of one item; `unsupported` from a Collector that predates it. */
+    async published(request: EnrichRequest): Promise<EnrichResult> {
+      if (Date.now() < publishedRefusedUntil)
+        return {
+          status: 'unsupported',
+          message: 'unsupportedPart',
+          coverage: {},
+        };
+      try {
+        const result = await this.enrich({ ...request, want: ['published'] });
+        // Only the time: nothing else of the item is replaced by this lookup.
+        return {
+          status: result.status,
+          message: result.message,
+          publishedAt: result.publishedAt,
+          coverage: {},
+        };
+      } catch (error) {
+        if (!(error instanceof AdapterError && error.httpStatus === 400))
+          throw error;
+        publishedRefusedUntil = Date.now() + PUBLISHED_RETRY_MS;
+        return {
+          status: 'unsupported',
+          message: 'unsupportedPart',
+          coverage: {},
+        };
+      }
     },
   };
 }

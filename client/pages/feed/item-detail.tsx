@@ -43,13 +43,8 @@ import { Textarea } from '#components/ui/textarea';
 import { cn } from 'cn';
 
 import { ArticleText, MediaGallery } from './content.js';
-import {
-  absoluteTime,
-  noteText,
-  relativeTime,
-  requestProblem,
-} from './format.js';
-import { LoadProblem, PlatformBadge, VerdictBadge } from './parts.js';
+import { noteText, relativeTime, requestProblem } from './format.js';
+import { ItemTime, LoadProblem, PlatformBadge, VerdictBadge } from './parts.js';
 import type {
   FeedItem,
   ItemState,
@@ -346,15 +341,7 @@ export function ItemDetail({
             <span className='truncate'>{item.sourceLabel ?? '—'}</span>
             {item.author ? <span>· {item.author}</span> : null}
             <span>·</span>
-            <time
-              dateTime={item.publishedAt ?? item.createdAt}
-              title={absoluteTime(
-                item.publishedAt ?? item.createdAt,
-                i18n.language,
-              )}
-            >
-              {relativeTime(item.publishedAt ?? item.createdAt, i18n.language)}
-            </time>
+            <ItemTime item={item} language={i18n.language} />
           </div>
           {close}
         </div>

@@ -140,6 +140,46 @@ export function absoluteTime(
   }).format(date);
 }
 
+/**
+ * When an item was published, as the feed shows it: "3 hours ago" for an exact time, "about 3 weeks ago" for one
+ * worked out from the platform's relative text, and "collected 13 minutes ago" when the platform gave none, so the
+ * time it was collected is never passed off as the time it was published. `title` says the full date and which it is.
+ */
+export function itemTime(
+  t: TFunction,
+  item: {
+    readonly publishedAt: string | null;
+    readonly publishedApproximate?: boolean;
+    readonly createdAt: string;
+  },
+  language: string,
+  now = Date.now(),
+): {
+  readonly dateTime: string;
+  readonly text: string;
+  readonly title: string;
+} {
+  if (!item.publishedAt) {
+    const time = relativeTime(item.createdAt, language, now);
+    return {
+      dateTime: item.createdAt,
+      text: t('feed.time.collected', { time }),
+      title: t('feed.time.collectedHint', {
+        time: absoluteTime(item.createdAt, language),
+      }),
+    };
+  }
+  const time = relativeTime(item.publishedAt, language, now);
+  const full = absoluteTime(item.publishedAt, language);
+  return item.publishedApproximate
+    ? {
+        dateTime: item.publishedAt,
+        text: t('feed.time.approximate', { time }),
+        title: t('feed.time.approximateHint', { time: full }),
+      }
+    : { dateTime: item.publishedAt, text: time, title: full };
+}
+
 /** Minutes as "15 min", "2 h", "1 d" in the current language. */
 export function frequencyText(t: TFunction, minutes: number): string {
   if (minutes % 1440 === 0)

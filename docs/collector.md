@@ -104,6 +104,11 @@ Answer:
   `cover` and `duration` apply to a video. They are the platform's own CDN links: NocoFeed neither downloads nor analyses
   them, shows them with no `Referer`, and says when one no longer loads. Omit `media` when none was read: an omitted
   list keeps what is stored, so a Collector that predates the field changes nothing.
+- `publishedAt` is an ISO instant. A platform that lists only relative text ("3 weeks ago", YouTube search) may send
+  the time it stands for — now less the stated age, the latest moment the text allows — with
+  `"publishedAtApproximate": true`; NocoFeed shows it as "about 3 weeks ago" and looks up the exact time later
+  (`want: ["published"]` below). Text that is not understood gives no `publishedAt`; never send the collection time as
+  the publication time. NocoFeed then shows the item as "collected …".
 - Counts that are unknown are **omitted**, never `0`. `coverage` states, per part, what was read (`available`,
   `partial`, `missing`, `unavailable`, `notRequested`, `failed`) and why (`note`). The analysis only reasons about parts
   marked as read.
@@ -120,6 +125,11 @@ Fetches more material for one stored item when the person asks for it.
   "want": ["transcript"]
 }
 ```
+
+`want` lists any of `body`, `comments`, `transcript` and `published`. `published` asks for the exact publication time
+of an item whose list gave none or an approximate one; the answer carries it as `item.publishedAt` (an exact ISO instant,
+no `publishedAtApproximate`) and replaces nothing else. NocoFeed asks for it only for YouTube, a few videos per
+scheduled tick (`resolvePublishedTimes`), and leaves a Collector that answers `400` to it alone for six hours.
 
 Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "media": […], "coverage": {…} } }`
 with only the parts it obtained. `media` comes with `body` (it is read from the same page) and replaces the stored list

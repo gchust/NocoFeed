@@ -156,7 +156,10 @@ export interface FeedListItem {
   readonly title: string;
   readonly summary: string | null;
   readonly url: string | null;
+  /** Null when the platform gave no time; `createdAt` is then when it was collected. */
   readonly publishedAt: string | null;
+  /** `publishedAt` was worked out from relative text ("3 weeks ago"). */
+  readonly publishedApproximate: boolean;
   readonly createdAt: string;
   readonly verdict: Verdict | null;
   readonly score: number;

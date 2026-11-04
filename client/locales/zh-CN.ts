@@ -95,6 +95,13 @@ const zhCN: AppResource = {
         newest: '最新发布',
       },
     },
+    time: {
+      approximate: '约{{time}}',
+      approximateHint:
+        '平台只给了“3 周前”这样的相对时间，按它推算约为 {{time}} 发布；确切时间稍后补全',
+      collected: '收录于{{time}}',
+      collectedHint: '平台没有给出发布时间，这是收录时间：{{time}}',
+    },
     read: {
       unreadOnly: '只看未读',
       markAllRead: '全部标为已读',

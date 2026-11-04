@@ -31,6 +31,7 @@ const listItem: FeedListItem = {
   summary: null,
   url: 'https://news.ycombinator.com/item?id=7',
   publishedAt: '2026-10-28T10:00:00Z',
+  publishedApproximate: false,
   createdAt: '2026-10-28T10:05:00Z',
   verdict: 'discuss',
   score: 72,
@@ -271,6 +272,56 @@ describe('feed page', () => {
         query: expect.objectContaining({ view: 'discuss' }),
       }),
     );
+  });
+
+  it('says when a time is approximate, and never shows the collection time as the publication time', async () => {
+    const day = 24 * 3_600_000;
+    itemsResponse = {
+      data: [
+        listItem,
+        {
+          ...listItem,
+          id: 21,
+          platform: 'youtube',
+          title: 'Search result said to be three weeks old',
+          publishedAt: new Date(Date.now() - 21 * day).toISOString(),
+          publishedApproximate: true,
+        },
+        {
+          ...listItem,
+          id: 22,
+          platform: 'youtube',
+          title: 'Search result with no time',
+          publishedAt: null,
+          publishedApproximate: false,
+          createdAt: new Date(Date.now() - 13 * 60_000).toISOString(),
+        },
+      ],
+      meta: {},
+    };
+    await renderAt('/');
+
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const timeOf = async (name: RegExp) =>
+      within(await within(list).findByRole('button', { name })).getByText(
+        (_, element) => element?.tagName === 'TIME',
+      );
+
+    const approximate = await timeOf(/three weeks old/);
+    expect(approximate).toHaveTextContent('about 3 weeks ago');
+    expect(approximate.getAttribute('title')).toMatch(
+      /^The platform only said/,
+    );
+
+    const undated = await timeOf(/with no time/);
+    expect(undated).toHaveTextContent('collected 13 minutes ago');
+    expect(undated.getAttribute('title')).toMatch(/gave no publication time/);
+
+    const exact = await timeOf(/evaluate agent tool use/);
+    expect(exact).not.toHaveTextContent(/about|collected/);
+    expect(exact).toHaveAttribute('dateTime', '2026-10-28T10:00:00Z');
   });
 
   it('counts what the current filters show and follows a new search', async () => {

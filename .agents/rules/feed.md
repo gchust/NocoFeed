@@ -135,6 +135,13 @@ the person's topics and experience, and the person keeps their own marks and not
   noise kind, and `sort=priority` and the digest's picks use `priority` (`priorityOf`). "Analyze again" bypasses both gates. Rule analyses have no
   quality and rank at `NEUTRAL_QUALITY`.
 - Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
+- **Publication times.** `publishedAt` is null when the platform gave none; `timelineAt` then holds the collection time
+  so the item can still be placed, and the feed labels it "collected …" — never as the publication time.
+  `publishedApproximate` marks a time worked out from relative text (YouTube search, "about 3 weeks ago"). The
+  `collect-due-sources` tick runs `resolvePublishedTimes`: for YouTube items collected in the last 30 days with no or an
+  approximate time, it asks the Collector (`want: ["published"]`, the video page) for the exact time, a few videos per
+  tick, and moves every owner's copy to it; `publishedCheckedAt` keeps a video from being asked again within a day
+  (`202611090001_feed_published_precision.ts`, `tests/server/feed-published-times.test.ts`).
 - Reddit refuses the JSON listing from most servers; the adapter falls back to the RSS feed and says so
   (`redditRssFallback`).
 
