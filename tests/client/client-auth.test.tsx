@@ -94,13 +94,13 @@ describe('application authentication pages', () => {
   it('puts the brand panel beside the form on wide screens', () => {
     renderAt('/', <LoginPage />);
     const panel = screen.getByRole('complementary', {
-      name: 'About this application',
+      name: 'About NocoFeed',
     });
     expect(panel).toHaveClass('hidden', 'xl:block');
-    expect(panel).toHaveTextContent('AI-native application platform');
-    expect(panel).toHaveTextContent('AI-native frontend');
-    expect(panel).toHaveTextContent('NocoBase foundation');
-    expect(panel).toHaveTextContent('Freedom above. Confidence below.');
+    expect(panel).toHaveTextContent('Personal interest feed');
+    expect(panel).toHaveTextContent('Every subscription in one feed');
+    expect(panel).toHaveTextContent('Judged by your interests');
+    expect(panel).toHaveTextContent('Your feed, your notes.');
   });
 
   it('shows the action error', () => {

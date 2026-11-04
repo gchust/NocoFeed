@@ -85,20 +85,22 @@ describe('shell translations', () => {
     expect(
       screen.getByRole('navigation', { name: 'Breadcrumb' }),
     ).toHaveTextContent('Overview');
-    expect(screen.getByText('AI builds freely.')).toBeVisible();
+    // NocoFeed's slogan from the application locale files, in place of the template's NocoBase one.
+    expect(screen.getByText('Follow only what matters.')).toBeVisible();
+    expect(
+      screen.getByText('AI sifts the noise, you keep the notes.'),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: 'NocoBase' }),
+    ).not.toBeInTheDocument();
     await act(() => runtime.changeLanguage('zh-CN'));
     expect(screen.getByRole('navigation', { name: '面包屑' })).toBeVisible();
-    expect(screen.getByText('AI 自由构建')).toBeVisible();
-    expect(
-      screen.getByRole('link', { name: 'NocoBase' }).parentElement,
-    ).toHaveTextContent('NocoBase 保障可靠');
+    expect(screen.getByText('只追你在乎的')).toBeVisible();
+    expect(screen.getByText('AI 筛掉噪音，笔记留给你')).toBeVisible();
+    expect(screen.queryByText('AI 自由构建')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '展开或收起导航' }),
     ).toHaveAttribute('title', '展开或收起导航');
-    expect(screen.getByRole('link', { name: 'NocoBase' })).toHaveAttribute(
-      'href',
-      'https://www.nocobase.com',
-    );
     await act(() => runtime.changeLanguage('en-US'));
     expect(
       screen.getByRole('navigation', { name: 'Breadcrumb' }),

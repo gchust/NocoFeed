@@ -1,6 +1,5 @@
-import { resolveAssetUrl } from '@nocobase/app-client';
 import { useTranslation } from '@nocobase/i18n/client';
-import { Blocks, ShieldCheck, Sparkles } from 'lucide-react';
+import { NewspaperIcon, NotebookPen, Rss, Sparkles } from 'lucide-react';
 import type { ReactElement, ReactNode } from 'react';
 
 import { AuthSplitLayout } from '#extensions/nocobase-auth-split-layout/auth-split-layout';
@@ -15,9 +14,9 @@ export interface AuthPageProps {
 }
 
 /**
- * The frame every sign-in, sign-up and password page shares: the form on the left, and on wide screens the NocoBase
- * brand panel on the right. Replace `BrandPanel` with the application's own content, or install
- * `auth-centered-layout` from the UI Library to drop the panel.
+ * The frame every sign-in, sign-up and password page shares: the form on the left, and on wide screens NocoFeed's
+ * brand panel on the right. The mark is the sidebar's newspaper in the primary colour rather than the template's
+ * NocoBase logo images, and the panel's copy is NocoFeed's slogan from `client/locales/{en-US,zh-CN}.ts`.
  */
 export function AuthPage({
   children,
@@ -32,20 +31,7 @@ export function AuthPage({
       asideLabel={t('auth.about')}
       className={['auth-page', className].filter(Boolean).join(' ')}
       description={description}
-      logo={
-        <>
-          <img
-            alt=''
-            className='dark:hidden'
-            src={resolveAssetUrl('/assets/logo-mark.png')}
-          />
-          <img
-            alt=''
-            className='hidden dark:block'
-            src={resolveAssetUrl('/assets/logo-mark-dark.png')}
-          />
-        </>
-      }
+      logo={<NewspaperIcon aria-hidden='true' className='text-primary' />}
       name={t('app.title')}
       title={title}
     >
@@ -60,13 +46,13 @@ function BrandPanel(): ReactElement {
   const features = [
     {
       description: t('auth.frontendDescription'),
-      icon: Sparkles,
+      icon: Rss,
       id: 'frontend',
       title: t('auth.frontend'),
     },
     {
       description: t('auth.foundationDescription'),
-      icon: ShieldCheck,
+      icon: Sparkles,
       id: 'foundation',
       title: t('auth.foundation'),
     },
@@ -104,7 +90,7 @@ function BrandPanel(): ReactElement {
           ))}
         </div>
         <div className='mt-12 flex items-center gap-2.5 border-t border-white/8 pt-6 text-xs text-(--auth-brand-muted)'>
-          <Blocks aria-hidden='true' className='size-4' />
+          <NotebookPen aria-hidden='true' className='size-4' />
           <span>{t('auth.marketingFooter')}</span>
         </div>
       </div>

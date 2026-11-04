@@ -12,6 +12,27 @@ const enUS = {
   // spreading the system one first, `navigation: { ...systemEnUS.navigation, orders: 'Orders' }`, since a group
   // written here replaces the system group of the same name rather than merging with it.
   'navigation.brandHome': 'NocoFeed home',
+  // NocoFeed's slogan, in place of the template's NocoBase one: the sidebar footer's two lines and the sign-in
+  // pages' brand panel.
+  shell: {
+    ...systemEnUS.shell,
+    buildFreely: 'Follow only what matters.',
+    reliability: 'AI sifts the noise, you keep the notes.',
+  },
+  'auth.about': 'About NocoFeed',
+  'auth.platform': 'Personal interest feed',
+  'auth.marketingTitleFirst': 'Follow only what matters.',
+  'auth.marketingTitleSecond': 'AI sifts the noise,',
+  'auth.marketingTitleThird': 'you keep the notes.',
+  'auth.marketingDescription':
+    'Subscribe to the public platforms you follow. NocoFeed analyses each item against your topics and experience, tells you whether to join in, learn or skip it, and keeps your marks and notes beside it.',
+  'auth.frontend': 'Every subscription in one feed',
+  'auth.frontendDescription':
+    'Reddit, Hacker News, RSS, YouTube, Bilibili and more, collected on schedule.',
+  'auth.foundation': 'Judged by your interests',
+  'auth.foundationDescription':
+    'Each item is ranked by match and worth, with the reasons shown.',
+  'auth.marketingFooter': 'Your feed, your notes.',
   navigation: {
     ...systemEnUS.navigation,
     feed: 'Feed',

@@ -109,9 +109,33 @@ describe('authentication translations', () => {
     expect(screen.getByLabelText('用户名或邮箱')).toBeVisible();
     expect(screen.getByRole('button', { name: '显示密码' })).toBeVisible();
     expect(screen.getByRole('link', { name: '注册' })).toBeVisible();
-    expect(screen.getByText('AI 原生应用平台')).toBeVisible();
+    expect(screen.getByText('个人兴趣信息流')).toBeVisible();
     await act(() => value.changeLanguage('en-US'));
     expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+  });
+  it("shows NocoFeed's slogan in the brand panel instead of the template's", async () => {
+    const value = await runtime();
+    renderPage(value, <LoginPage />);
+    const panel = screen.getByRole('complementary', { name: 'About NocoFeed' });
+    expect(panel).toHaveTextContent('Personal interest feed');
+    expect(
+      screen.getByRole('heading', {
+        name: 'Follow only what matters.AI sifts the noise,you keep the notes.',
+      }),
+    ).toBeVisible();
+    expect(panel).toHaveTextContent('Your feed, your notes.');
+    expect(panel).not.toHaveTextContent(/NocoBase|AI-native/);
+    await act(() => value.changeLanguage('zh-CN'));
+    const zhPanel = screen.getByRole('complementary', {
+      name: '关于 NocoFeed',
+    });
+    expect(
+      screen.getByRole('heading', {
+        name: '只追你在乎的AI 筛掉噪音笔记留给你',
+      }),
+    ).toBeVisible();
+    expect(zhPanel).toHaveTextContent('订阅汇成一条信息流');
+    expect(zhPanel).not.toHaveTextContent(/NocoBase|AI 原生/);
   });
   it('retranslates an existing password mismatch', async () => {
     const value = await runtime();

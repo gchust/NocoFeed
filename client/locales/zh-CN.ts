@@ -7,6 +7,24 @@ const zhCN: AppResource = {
   ...systemZhCN,
   ...fileUi,
   'navigation.brandHome': 'NocoFeed 首页',
+  shell: {
+    ...systemZhCN.shell,
+    buildFreely: '只追你在乎的',
+    reliability: 'AI 筛掉噪音，笔记留给你',
+  },
+  'auth.about': '关于 NocoFeed',
+  'auth.platform': '个人兴趣信息流',
+  'auth.marketingTitleFirst': '只追你在乎的',
+  'auth.marketingTitleSecond': 'AI 筛掉噪音',
+  'auth.marketingTitleThird': '笔记留给你',
+  'auth.marketingDescription':
+    '订阅你关注的公开平台。NocoFeed 按你的兴趣主题和经验分析每条内容，告诉你值得参与、学习还是跳过，并把你的标记和笔记留在旁边。',
+  'auth.frontend': '订阅汇成一条信息流',
+  'auth.frontendDescription':
+    'Reddit、Hacker News、RSS、YouTube、B 站等，按计划自动采集。',
+  'auth.foundation': '按你的兴趣判断',
+  'auth.foundationDescription': '每条内容按匹配度和价值排序，并给出依据。',
+  'auth.marketingFooter': '你的信息流，你的笔记。',
   navigation: {
     ...systemZhCN.navigation,
     feed: '信息流',

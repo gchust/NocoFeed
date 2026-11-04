@@ -43,4 +43,11 @@ Keep the identity-keyed `SessionPreparation` boundary: mounted private list cond
 `client/layouts/components/app-brand.tsx` draws the NocoFeed wordmark from theme tokens instead of the template's
 NocoBase logo images, `index.html` uses the purple brand colour for its pre-JavaScript loader and the page title is
 NocoFeed. The primary colour is `#6950e8` (dark `#a898ff`) in `client/theme/themes/*.css`. Keep these when upgrading
-the template; the sidebar footer's NocoBase credit is left as the template ships it.
+the template.
+
+The slogan is NocoFeed's own: "Follow only what matters. AI sifts the noise, you keep the notes." / 「只追你在乎的。AI
+筛掉噪音，笔记留给你。」 It replaces the template's NocoBase slogan through the application locale files (`shell.*` for
+the sidebar footer, `auth.about`, `auth.platform`, `auth.marketing*`, `auth.frontend*`, `auth.foundation*` for the
+sign-in brand panel), never by editing `client/locales/system/`. The sign-in pages (`client/pages/auth/shared.tsx`)
+show the newspaper mark in the primary colour instead of the NocoBase logo images, and `index.html`'s meta description
+carries the same slogan. `tests/client/layout-i18n.test.tsx` and `tests/client/auth-i18n.test.tsx` pin it.
