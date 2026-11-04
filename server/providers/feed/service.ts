@@ -40,12 +40,15 @@ import {
   SEARCH_PLATFORMS,
   type Platform,
 } from './catalog.js';
+import { coverOf } from './media.js';
 import { truncate } from './text.js';
 import { createHash } from 'node:crypto';
 import type {
   CollectResult,
   CommentEntry,
+  EnrichResult,
   ItemCoverage,
+  MediaEntry,
   RunCoverage,
   TranscriptSegment,
 } from './types.js';
@@ -213,6 +216,12 @@ export interface FeedListItem {
   gate: AnalysisGate | null;
   topicId: number | null;
   lead: string | null;
+  /** The start of the post's own text (body, else a summary that is more than the title); null when there is none. */
+  excerpt: string | null;
+  /** The first image, or a video's cover: the platform's CDN link. */
+  cover: string | null;
+  /** The post is a video. */
+  video: boolean;
   favorite: boolean;
   later: boolean;
   participated: boolean;
@@ -226,6 +235,8 @@ export interface FeedItemDetail extends FeedListItem {
   body: string | null;
   comments: CommentEntry[];
   transcript: TranscriptSegment[];
+  /** Images and videos in display order; empty when none were read. */
+  media: MediaEntry[];
   metrics: Record<string, number>;
   coverage: ItemCoverage;
   contentVersion: number;
@@ -365,6 +376,23 @@ const DEFAULT_COVERAGE: ItemCoverage = {
 };
 
 const MAX_RUN_MS = 5 * 60_000;
+/**
+ * Fetching the text of title-only items without being asked (`OperationSpec.prefetch`): a few right after the run
+ * that brought them, more on each scheduled tick, only for items collected in the last two days, and never past the
+ * time budget. A Collector that needs signing in, is blocked or rate limited stops it until the next tick, so a
+ * platform's risk control is not hammered.
+ */
+const PREFETCH_PER_RUN = 5;
+const PREFETCH_PER_TICK = 10;
+const PREFETCH_BUDGET_MS = 90_000;
+const PREFETCH_WINDOW_MS = 2 * 24 * 60 * 60_000;
+const PREFETCH_STOPS = new Set([
+  'needsLogin',
+  'blocked',
+  'rateLimited',
+  'unconfigured',
+]);
+const EXCERPT_LENGTH = 280;
 const HOUR_MS = 3_600_000;
 
 /** Failed runs in a row before a subscription counts as failing. */
@@ -1253,6 +1281,7 @@ export function createFeedService(deps: FeedServiceDeps) {
               body: item.body ?? null,
               comments: item.comments ?? null,
               transcript: item.transcript ?? null,
+              media: item.media?.length ? item.media : null,
               metrics: item.metrics ?? null,
               coverage: item.coverage,
               contentVersion: 1,
@@ -1317,6 +1346,21 @@ export function createFeedService(deps: FeedServiceDeps) {
             error instanceof Error ? error.message : String(error),
             2_000,
           ),
+        });
+      }
+      // Title-only items wait for their text; the first few get it now, which runs the analysis they waited for.
+      // Each fetch is its own `enrich` run; none of it changes how this collection ended.
+      try {
+        await prefetchWaiting({
+          ownerId,
+          itemIds: insertedIds,
+          limit: PREFETCH_PER_RUN,
+          trigger,
+        });
+      } catch (error) {
+        deps.log('warn', 'feed prefetch failed', {
+          sourceId,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
       return await getRun(ownerId, runId);
@@ -1510,6 +1554,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     body: (row.body as string | null) ?? null,
     comments: json<CommentEntry[] | null>(row.comments, null),
     transcript: json<TranscriptSegment[] | null>(row.transcript, null),
+    media: json<MediaEntry[] | null>(row.media, null),
     coverage: json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE),
   });
 
@@ -2011,33 +2056,28 @@ export function createFeedService(deps: FeedServiceDeps) {
     }
   }
 
-  async function enrichItem(
+  /**
+   * Fetches `want` for one item and stores what came back. `asked` is the person pressing the button: every failure
+   * is recorded on the item's coverage. Unasked, a failure that says nothing about the item (sign-in, a block, a rate
+   * limit, no Collector) leaves the coverage as it was, so it is tried again later.
+   */
+  async function fetchMaterial(
     ownerId: string,
-    itemId: number,
-  ): Promise<FeedItemDetail> {
-    const row = await requireRow('feedItems', ownerId, itemId);
-    const platform = String(row.platform);
-    const source =
-      row.sourceId == null
-        ? null
-        : ((await repo('feedSources').findOne({
-            filter: { ownerId, id: Number(row.sourceId) },
-          })) as Row | null);
-    const want = enrichableFor(
-      platform,
-      source ? String(source.operation) : null,
-    );
-    if (!want.length) throw new FeedError('invalid', 'nothingToEnrich');
+    row: Row,
+    want: ('body' | 'comments' | 'transcript')[],
+    { trigger, asked }: { trigger: 'schedule' | 'manual'; asked: boolean },
+  ): Promise<EnrichResult> {
+    const itemId = Number(row.id);
     const runId = await startRun({
       ownerId,
       itemId,
       sourceId: row.sourceId ?? null,
       stage: 'enrich',
-      trigger: 'manual',
+      trigger,
       scope: truncate(String(row.title), 300),
     });
     const result = await adapters.enrich({
-      platform,
+      platform: String(row.platform),
       externalId: String(row.externalId),
       url: (row.url as string | null) ?? null,
       want,
@@ -2045,7 +2085,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     });
     const ok = result.status === 'ok' || result.status === 'partial';
     const coverage = json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE);
-    if (!ok) {
+    if (!ok && (asked || !PREFETCH_STOPS.has(result.status))) {
       // Record why each wanted part is still missing, without discarding what was obtained before.
       for (const part of want) {
         const current = coverage[part];
@@ -2071,6 +2111,8 @@ export function createFeedService(deps: FeedServiceDeps) {
             ? { comments: result.comments }
             : {}),
           ...(ok && result.transcript ? { transcript: result.transcript } : {}),
+          // Media comes with the body; an answer without any keeps what is stored.
+          ...(ok && result.media?.length ? { media: result.media } : {}),
           coverage: ok ? { ...coverage, ...result.coverage } : coverage,
           ...(ok
             ? {
@@ -2090,7 +2132,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         },
       } as never);
     });
-    if (!ok) throw new FeedError('unavailable', result.status);
+    if (!ok) return result;
     // An item waiting for material has had no real analysis yet, so this is the analysis it was waiting for rather than
     // a rewrite; any other analysis is left to go stale until the person asks again.
     const current = (await repo('feedAnalyses').findOne({
@@ -2102,7 +2144,108 @@ export function createFeedService(deps: FeedServiceDeps) {
         [itemId],
         row.sourceId == null ? null : Number(row.sourceId),
       );
+    return result;
+  }
+
+  async function enrichItem(
+    ownerId: string,
+    itemId: number,
+  ): Promise<FeedItemDetail> {
+    const row = await requireRow('feedItems', ownerId, itemId);
+    const source =
+      row.sourceId == null
+        ? null
+        : ((await repo('feedSources').findOne({
+            filter: { ownerId, id: Number(row.sourceId) },
+          })) as Row | null);
+    const want = enrichableFor(
+      String(row.platform),
+      source ? String(source.operation) : null,
+    );
+    if (!want.length) throw new FeedError('invalid', 'nothingToEnrich');
+    const result = await fetchMaterial(ownerId, row, want, {
+      trigger: 'manual',
+      asked: true,
+    });
+    if (result.status !== 'ok' && result.status !== 'partial')
+      throw new FeedError('unavailable', result.status);
     return getItem(ownerId, itemId);
+  }
+
+  /**
+   * Fetches the text of recent title-only items that are waiting for it, where the operation that found them declares
+   * `prefetch`; enriching runs the analysis they were waiting for. Called after a run (its new items) and on every
+   * scheduled tick (anything still waiting). Returns how many items were fetched.
+   */
+  async function prefetchWaiting({
+    ownerId,
+    itemIds,
+    limit = PREFETCH_PER_TICK,
+    trigger = 'schedule',
+    now = new Date(),
+  }: {
+    ownerId?: string;
+    itemIds?: number[];
+    limit?: number;
+    trigger?: 'schedule' | 'manual';
+    now?: Date;
+  } = {}): Promise<number> {
+    if (!adapters.collectorConfigured()) return 0;
+    const platforms = CATALOG.filter((spec) =>
+      spec.operations.some((op) => op.prefetch?.length),
+    ).map((spec) => spec.platform);
+    let query = database
+      .query()
+      .selectFrom('feedItems as i')
+      .innerJoin('feedAnalyses as a', (join) =>
+        join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
+      )
+      .leftJoin('feedSources as s', 's.id', 'i.sourceId')
+      .selectAll('i')
+      .select(['s.operation as sourceOperation'])
+      .where('a.gate', '=', 'awaitingMaterial')
+      .where('i.platform', 'in', platforms)
+      .where('i.createdAt', '>=', new Date(now.getTime() - PREFETCH_WINDOW_MS));
+    if (ownerId) query = query.where('i.ownerId', '=', ownerId);
+    if (itemIds) {
+      if (!itemIds.length) return 0;
+      query = query.where('i.id', 'in', itemIds);
+    }
+    // Over-fetch: rows whose body was already tried, or whose operation does not prefetch, are skipped below.
+    const rows = await query
+      .orderBy('i.id', 'desc')
+      .limit(limit * 5)
+      .execute<Row>();
+    const deadline = Date.now() + PREFETCH_BUDGET_MS;
+    let fetched = 0;
+    for (const row of rows) {
+      if (fetched >= limit || Date.now() >= deadline) break;
+      const spec = CATALOG.find((entry) => entry.platform === row.platform);
+      const op =
+        spec?.operations.find(
+          (entry) => entry.operation === row.sourceOperation,
+        ) ?? spec?.operations[0];
+      const want = [...(op?.prefetch ?? [])];
+      if (!want.length) continue;
+      const coverage = json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE);
+      // Only parts never tried: a recorded failure waits for the person to ask.
+      if (want.some((part) => coverage[part]?.status !== 'missing')) continue;
+      try {
+        const result = await fetchMaterial(String(row.ownerId), row, want, {
+          trigger,
+          asked: false,
+        });
+        fetched += 1;
+        if (PREFETCH_STOPS.has(result.status)) break;
+      } catch (error) {
+        deps.log('warn', 'feed prefetch failed', {
+          itemId: Number(row.id),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        break;
+      }
+    }
+    return fetched;
   }
 
   function enrichableFor(
@@ -2149,6 +2292,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       body: (row.body as string | null) ?? null,
       comments: json<CommentEntry[]>(row.comments, []),
       transcript: json<TranscriptSegment[]>(row.transcript, []),
+      media: json<MediaEntry[]>(row.media, []),
       metrics: json<Record<string, number>>(row.metrics, {}),
       coverage: json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE),
       contentVersion: Number(row.contentVersion ?? 1),
@@ -2209,6 +2353,15 @@ export function createFeedService(deps: FeedServiceDeps) {
           },
   });
 
+  /** The opening of the post's own words, for the card: the body, else a summary that says more than the title. */
+  const excerptOf = (row: Row): string | null => {
+    const body = typeof row.body === 'string' ? row.body.trim() : '';
+    const summary = typeof row.summary === 'string' ? row.summary.trim() : '';
+    const text =
+      body || (summary && summary !== String(row.title).trim() ? summary : '');
+    return text ? truncate(text, EXCERPT_LENGTH) : null;
+  };
+
   const toListItem = (
     row: Row,
     analysis: Row | null,
@@ -2231,6 +2384,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     gate: (analysis?.gate as AnalysisGate | null) ?? null,
     topicId: analysis?.topicId == null ? null : Number(analysis.topicId),
     lead: (analysis?.lead as string | null) ?? null,
+    excerpt: excerptOf(row),
+    cover: coverOf(json<MediaEntry[] | null>(row.media, null)),
+    video: json<MediaEntry[] | null>(row.media, null)?.[0]?.type === 'video',
     favorite: bool(state?.favorite),
     later: bool(state?.later),
     participated: bool(state?.participated),
@@ -2348,6 +2504,8 @@ export function createFeedService(deps: FeedServiceDeps) {
           'sourceLabel',
           'title',
           'summary',
+          'body',
+          'media',
           'url',
           'publishedAt',
           'createdAt',
@@ -2892,6 +3050,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     getItem,
     updateState,
     enrichItem,
+    prefetchWaiting,
     reanalyzeItem,
     settleAgentReads,
     itemOwners,

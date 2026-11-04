@@ -9,6 +9,7 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611020003_feed_analysis_quality.ts` (quality, priority, gates), `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
   `202611040001_feed_topic_searches.ts` (topic search terms, platforms, schedule; `feedSources.topicId`).
   `202611050001_feed_runner_agent.ts` (`feedProfiles.readerAgentId`, `feedRuns.agentRunId`/`agentResult`).
+  `202611060001_feed_item_media.ts` (`feedItems.media`: images and video links, see "The post first" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -61,6 +62,23 @@ the person's topics and experience, and the person keeps their own marks and not
   through `database` deadlocks. Read what the transaction needs before it starts.
 - `UpdateTopicBody` has no defaults on purpose: Zod's `.partial()` still applies `.default()`, which would reset an
   omitted field.
+
+## The post first
+
+- **Text and media are fetched, not only titles.** An operation with `prefetch` in `catalog.ts` (Xiaohongshu search,
+  which lists only titles) gets the body of its title-only items without being asked: `prefetchWaiting` fetches up to
+  `PREFETCH_PER_RUN` right after the run that brought them and `PREFETCH_PER_TICK` more on every `collect-due-sources`
+  tick, for items collected in the last two days, within `PREFETCH_BUDGET_MS`. Each is an `enrich` run, and the analysis
+  the item waited for (`gate: awaitingMaterial`) runs on the text. `needsLogin`/`blocked`/`rateLimited`/`unconfigured`
+  stop it and leave the coverage untouched (tried again next tick); any other failure is recorded on the item and only
+  the person's "Fetch" tries again.
+- **Media** (`feedItems.media`, `MediaEntry` in `types.ts`) comes from the Collector with the body; `cleanMedia`
+  (`media.ts`) keeps https links only. Links are the platform's signed CDN links: never downloaded or analysed, shown
+  with `referrerPolicy='no-referrer'`, and a picture that fails says so. The prompt only says how many there are
+  (`mediaLine`). The list item carries `excerpt`, `cover` and `video` so a card can show the post.
+- **Pages show the original.** The card shows title, the opening of the text and the cover, with the analysis as one
+  line; the detail shows the analysis as one collapsed line (`Collapsible`) above the media gallery and the text in its
+  paragraphs (`content.tsx`); the analysis details, feedback and the material read open from that line.
 
 ## Rules that keep it honest
 
@@ -118,6 +136,8 @@ runtime someone connects, which can open pages themselves. NocoFeed hands one ta
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
-and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density). Runner agents:
+and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, the post first: excerpt, cover, gallery,
+video, paragraphs). Text and media: `tests/server/feed-media-prefetch.test.ts`,
+`tests/database/feed-item-media-migration.test.ts` and the media case in `feed-collector-client.test.ts`. Runner agents:
 `tests/server/feed-runner-agent.test.ts` (hand-off, assembly, settling, fallbacks; an `ensureSystem` agent stands in
 for a reported one), `tests/database/feed-runner-agent-migration.test.ts` and `tests/client/preferences-page.test.tsx`.

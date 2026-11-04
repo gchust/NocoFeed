@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 import type { FeedConfig } from '../../config/feed.js';
 import { findOperation } from './catalog.js';
+import { cleanMedia } from './media.js';
 import { htmlToText, mapLimit, truncate } from './text.js';
 import {
   AdapterError,
@@ -165,6 +166,7 @@ export function createAdapters(config: () => FeedConfig): Adapters {
             body: next.body ?? merged.body,
             comments: next.comments ?? merged.comments,
             transcript: next.transcript ?? merged.transcript,
+            media: next.media ?? merged.media,
             coverage: { ...merged.coverage, ...next.coverage },
           }),
           { status: 'ok', coverage: {} },
@@ -998,6 +1000,7 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         items: items.map((item) => ({
           ...item,
           url: webLink(item.url),
+          media: cleanMedia(item.media),
           coverage: item.coverage ?? {
             body: { status: item.body ? 'available' : 'missing' },
             comments: { status: 'notRequested' },
@@ -1022,6 +1025,7 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         status: response.status ?? 'ok',
         message: response.message,
         ...(response.item ?? { coverage: {} }),
+        media: cleanMedia(response.item?.media),
         coverage: response.item?.coverage ?? {},
       };
     },

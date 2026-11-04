@@ -21,6 +21,11 @@ export interface OperationSpec {
   readonly capabilities: readonly string[];
   /** Enrichment the adapter can perform later on one item. */
   readonly enrich: readonly ('body' | 'comments' | 'transcript')[];
+  /**
+   * Parts fetched without being asked, right after a run brings in an item that has only its title, so the prefilter
+   * and the analysis read the post rather than its headline (`prefetchWaiting` in the service).
+   */
+  readonly prefetch?: readonly 'body'[];
   /** Length a text target must have, matching what the Collector accepts; it may not start with "-" either. */
   readonly targetLength?: { readonly min: number; readonly max: number };
 }
@@ -143,6 +148,8 @@ export const CATALOG: readonly PlatformSpec[] = [
         input: 'text',
         capabilities: ['searchCandidates', 'noteText'],
         enrich: ['body', 'comments'],
+        // Search lists only titles, and many are bait: the note text (with its images) decides.
+        prefetch: ['body'],
       },
       {
         operation: 'post',

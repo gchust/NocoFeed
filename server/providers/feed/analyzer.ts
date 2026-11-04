@@ -2,6 +2,7 @@ import { hasCjk, looksLikeQuestion, terms, truncate } from './text.js';
 import type {
   CommentEntry,
   ItemCoverage,
+  MediaEntry,
   PartCoverage,
   TranscriptSegment,
 } from './types.js';
@@ -48,6 +49,8 @@ export interface AnalysisItem {
   body: string | null;
   comments: CommentEntry[] | null;
   transcript: TranscriptSegment[] | null;
+  /** Shown to the person, never looked at; the prompt only says how many there are. */
+  media?: readonly MediaEntry[] | null;
   coverage: ItemCoverage;
 }
 
@@ -76,8 +79,20 @@ export interface AnalysisDraft {
   promptVersion: string;
 }
 
+/** How many pictures and videos the post has, which the model cannot see: a short text may carry its content in them. */
+export function mediaLine(media: readonly MediaEntry[] | null | undefined) {
+  const images = media?.filter((entry) => entry.type === 'image').length ?? 0;
+  const videos = media?.filter((entry) => entry.type === 'video').length ?? 0;
+  if (!images && !videos) return '(none obtained)';
+  const parts = [
+    ...(images ? [`${images} image${images > 1 ? 's' : ''}`] : []),
+    ...(videos ? [`${videos} video${videos > 1 ? 's' : ''}`] : []),
+  ];
+  return `${parts.join(', ')} (not seen; the text may refer to them)`;
+}
+
 export const RULES_VERSION = 'rules-4';
-export const PROMPT_VERSION = 'prompt-4';
+export const PROMPT_VERSION = 'prompt-5';
 export const PREFILTER_VERSION = 'prefilter-1';
 
 export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
@@ -850,6 +865,7 @@ Title: ${item.title}
 Author: ${item.author ?? 'unknown'}
 Summary: ${truncate(item.summary, 1_000) || '(none)'}
 Body: ${truncate(item.body, 6_000) || '(not obtained)'}
+Media: ${mediaLine(item.media)}
 Subtitles: ${transcript || '(not obtained)'}
 Comments: ${comments || '(not obtained)'}
 >>>

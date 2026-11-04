@@ -288,6 +288,15 @@ export const FeedListItemSchema = z
     gate: GATE.nullable(),
     topicId: z.number().int().nullable(),
     lead: z.string().nullable(),
+    excerpt: z.string().nullable().meta({
+      description:
+        "The opening of the post's own text (body, else a summary beyond the title)",
+    }),
+    cover: z.string().nullable().meta({
+      description:
+        "The first image or a video's cover, a link on the platform's CDN",
+    }),
+    video: z.boolean().meta({ description: 'The post is a video' }),
     favorite: z.boolean(),
     later: z.boolean(),
     participated: z.boolean(),
@@ -358,6 +367,21 @@ export const FeedItemSchema = FeedListItemSchema.extend({
       text: z.string(),
     }),
   ),
+  media: z
+    .array(
+      z.object({
+        type: z.enum(['image', 'video']),
+        url: z.string(),
+        width: z.number().int().optional(),
+        height: z.number().int().optional(),
+        cover: z.string().optional(),
+        duration: z.number().optional(),
+      }),
+    )
+    .meta({
+      description:
+        "Images and videos in display order: https links on the platform's CDN, never downloaded or analysed",
+    }),
   metrics: z.record(z.string(), z.number()),
   coverage: z.object({
     body: PartCoverage,

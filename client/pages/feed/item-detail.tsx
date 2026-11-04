@@ -4,7 +4,9 @@ import {
   AlertTriangleIcon,
   BookmarkIcon,
   CheckCheckIcon,
+  ChevronDownIcon,
   ClockIcon,
+  DownloadIcon,
   EyeOffIcon,
   ExternalLinkIcon,
   MessageCircleReplyIcon,
@@ -20,6 +22,11 @@ import { SessionExpiredAlert } from '#components/session-expired-alert';
 import { StatusBadge } from '#components/status-badge';
 import { Alert, AlertDescription } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '#components/ui/collapsible';
 import { Input } from '#components/ui/input';
 import { Label } from '#components/ui/label';
 import { Separator } from '#components/ui/separator';
@@ -28,6 +35,7 @@ import { Spinner } from '#components/ui/spinner';
 import { Textarea } from '#components/ui/textarea';
 import { cn } from 'cn';
 
+import { ArticleText, MediaGallery } from './content.js';
 import {
   absoluteTime,
   noteText,
@@ -79,6 +87,7 @@ export function ItemDetail({
     readonly error?: unknown;
   }>();
   const [busy, setBusy] = useState<Busy>();
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -268,6 +277,12 @@ export function ItemDetail({
     ['transcript', item.coverage.transcript],
     ['media', item.coverage.media],
   ];
+  // The post's own words: its body, else a summary that says more than the title.
+  const text =
+    item.body?.trim() ||
+    (item.summary?.trim() && item.summary.trim() !== item.title.trim()
+      ? item.summary.trim()
+      : '');
 
   return (
     <article className='flex flex-col gap-5 p-5' aria-busy={loading}>
@@ -356,220 +371,262 @@ export function ItemDetail({
         </div>
       </header>
 
-      <Separator />
+      {item.agentReading ? (
+        <Alert>
+          <Spinner />
+          <AlertDescription>
+            {t('feed.detail.agentReading', {
+              time: relativeTime(item.agentReading.startedAt, i18n.language),
+            })}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-      <section aria-labelledby='feed-analysis' className='flex flex-col gap-3'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <h3 id='feed-analysis' className='text-sm font-semibold'>
-            {t('feed.detail.analysis')}
-          </h3>
+      {/* The analysis is one line until asked for; the post itself is what the page shows. */}
+      <Collapsible
+        open={analysisOpen}
+        onOpenChange={setAnalysisOpen}
+        className='rounded-lg border'
+      >
+        <CollapsibleTrigger
+          id='feed-analysis'
+          className='flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-muted-foreground outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50'
+        >
+          <SparklesIcon className='size-3.5 shrink-0' aria-hidden='true' />
+          <span className='sr-only'>{t('feed.detail.analysis')}</span>
           <VerdictBadge verdict={analysis?.verdict ?? null} />
           {analysis ? (
-            <span className='text-xs text-muted-foreground tabular-nums'>
+            <span className='shrink-0 tabular-nums'>
               {t('feed.scoreValue', { score: Math.round(analysis.score) })}
             </span>
           ) : null}
           {analysis?.quality != null ? (
-            <span className='text-xs text-muted-foreground tabular-nums'>
+            <span className='shrink-0 tabular-nums'>
               {t('feed.qualityValue', {
                 quality: Math.round(analysis.quality),
               })}
             </span>
           ) : null}
           {analysis?.gate ? (
-            <span className='text-xs text-muted-foreground'>
-              {t(`feed.gate.${analysis.gate}`)}
-            </span>
+            <span className='shrink-0'>{t(`feed.gate.${analysis.gate}`)}</span>
           ) : null}
-          {topicName ? (
-            <span className='text-xs text-muted-foreground'>#{topicName}</span>
-          ) : null}
-          <Button
-            type='button'
-            size='xs'
-            variant='outline'
-            className='ml-auto'
-            disabled={Boolean(busy) || Boolean(item.agentReading)}
-            onClick={() => void analyze()}
-          >
-            {busy === 'analyze' ? (
-              <Spinner data-icon='inline-start' />
-            ) : (
-              <RotateCwIcon data-icon='inline-start' />
-            )}
-            {t('feed.detail.reanalyze')}
-          </Button>
-        </div>
-        {item.agentReading ? (
-          <Alert>
-            <Spinner />
-            <AlertDescription>
-              {t('feed.detail.agentReading', {
-                time: relativeTime(item.agentReading.startedAt, i18n.language),
-              })}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {item.analysisStale ? (
-          <Alert>
-            <AlertTriangleIcon />
-            <AlertDescription>{t('feed.detail.stale')}</AlertDescription>
-          </Alert>
-        ) : null}
-        {analysis ? (
-          <>
-            {analysis.lead ? (
-              <div className='rounded-lg border border-primary/20 bg-primary/5 p-3'>
-                <p className='mb-1 flex items-center gap-1 text-xs font-medium text-primary'>
-                  <SparklesIcon className='size-3.5' />
-                  {t(`feed.detail.lead.${analysis.verdict}`)}
-                </p>
-                <p className='text-sm leading-6'>{analysis.lead}</p>
-              </div>
-            ) : null}
-            <dl className='grid gap-3 text-sm sm:grid-cols-2'>
-              <Fact
-                label={t('feed.detail.interest')}
-                value={t(`feed.levels.${analysis.interestLevel}`, {
-                  defaultValue: analysis.interestLevel,
-                })}
-                detail={analysis.interestReason}
-              />
-              <Fact
-                label={t('feed.detail.experience')}
-                value={t(`feed.levels.${analysis.experienceLevel}`, {
-                  defaultValue: analysis.experienceLevel,
-                })}
-                detail={analysis.experienceReason}
-              />
-            </dl>
-            {analysis.steps.length > 0 ? (
-              <div className='flex flex-col gap-2'>
-                <h4 className='text-xs font-medium text-muted-foreground'>
-                  {t('feed.detail.steps')}
-                </h4>
-                <ol className='flex flex-col gap-2'>
-                  {/* Steps and comments have no ids and never reorder, so their position is their identity. */}
-                  {analysis.steps.map((step, index) => (
-                    // eslint-disable-next-line @eslint-react/no-array-index-key
-                    <li key={index} className='flex gap-3 text-sm'>
-                      <span className='flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs tabular-nums'>
-                        {index + 1}
-                      </span>
-                      <span>
-                        <span className='font-medium'>{step.title}</span>
-                        {step.detail ? (
-                          <span className='block text-muted-foreground'>
-                            {step.detail}
-                          </span>
-                        ) : null}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
-            {analysis.qualityDetail ? (
-              <TextBlock label={t('feed.detail.quality')}>
-                {t('feed.detail.qualityAxes', analysis.qualityDetail)}
-                {analysis.qualityDetail.noise !== 'none'
-                  ? ` · ${t(`feed.noise.${analysis.qualityDetail.noise}`)}`
-                  : ''}
-              </TextBlock>
-            ) : null}
-            {analysis.evidence ? (
-              <TextBlock label={t('feed.detail.evidence')}>
-                {analysis.evidence}
-              </TextBlock>
-            ) : null}
-            {analysis.uncertainty ? (
-              <TextBlock label={t('feed.detail.uncertainty')}>
-                {analysis.uncertainty}
-              </TextBlock>
-            ) : null}
-            <p className='text-xs text-muted-foreground'>
-              {analysis.engine === 'agent'
-                ? t('feed.detail.byAgent', { agent: analysis.model ?? '—' })
-                : analysis.engine === 'model'
-                  ? t('feed.detail.byModel', { model: analysis.model ?? '—' })
-                  : t('feed.detail.byRules')}
-              {' · '}
-              {relativeTime(analysis.createdAt, i18n.language)}
-            </p>
-            <FeedbackButtons
-              value={item.state.feedback}
-              busy={busy === 'feedback'}
-              disabled={Boolean(busy)}
-              onChange={(feedback) => void patchState({ feedback }, 'feedback')}
+          {topicName ? <span className='shrink-0'>#{topicName}</span> : null}
+          <span className='min-w-0 flex-1 truncate text-foreground'>
+            {analysis?.lead ?? ''}
+          </span>
+          {item.analysisStale ? (
+            <AlertTriangleIcon
+              className='size-3.5 shrink-0 text-(--status-warning)'
+              aria-label={t('feed.detail.stale')}
             />
-          </>
-        ) : (
-          <p className='text-sm text-muted-foreground'>
-            {t('feed.detail.noAnalysis')}
-          </p>
-        )}
-      </section>
-
-      <Separator />
-
-      <section aria-labelledby='feed-coverage' className='flex flex-col gap-3'>
-        <div className='flex items-center gap-2'>
-          <h3 id='feed-coverage' className='text-sm font-semibold'>
-            {t('feed.detail.coverage')}
-          </h3>
-          {item.enrichable.length > 0 ? (
+          ) : null}
+          <ChevronDownIcon
+            className={cn(
+              'size-4 shrink-0 transition-transform',
+              analysisOpen && 'rotate-180',
+            )}
+            aria-hidden='true'
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className='flex flex-col gap-3 border-t p-3'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <h3 className='text-sm font-semibold'>
+              {t('feed.detail.analysis')}
+            </h3>
             <Button
               type='button'
               size='xs'
               variant='outline'
               className='ml-auto'
-              disabled={Boolean(busy)}
-              onClick={() => void enrich()}
+              disabled={Boolean(busy) || Boolean(item.agentReading)}
+              onClick={() => void analyze()}
             >
-              {busy === 'enrich' ? <Spinner data-icon='inline-start' /> : null}
-              {t('feed.detail.fetch', {
-                parts: item.enrichable
-                  .map((part) => t(`feed.parts.${part}`))
-                  .join(t('feed.common.listSeparator')),
-              })}
+              {busy === 'analyze' ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <RotateCwIcon data-icon='inline-start' />
+              )}
+              {t('feed.detail.reanalyze')}
             </Button>
+          </div>
+          {item.analysisStale ? (
+            <Alert>
+              <AlertTriangleIcon />
+              <AlertDescription>{t('feed.detail.stale')}</AlertDescription>
+            </Alert>
           ) : null}
-        </div>
-        <p className='text-xs text-muted-foreground'>
-          {t('feed.detail.coverageHint')}
-        </p>
-        <ul className='flex flex-col gap-2'>
-          {parts.map(([part, coverage]) =>
-            coverage ? (
-              <li
-                key={part}
-                className='flex flex-wrap items-center gap-2 text-sm'
-              >
-                <span className='w-20 shrink-0 text-muted-foreground'>
-                  {t(`feed.parts.${part}`)}
-                </span>
-                <StatusBadge size='sm' tone={coverageTone(coverage.status)}>
-                  {t(`feed.coverage.${coverage.status}`, {
-                    defaultValue: coverage.status,
+          {analysis ? (
+            <>
+              {analysis.lead ? (
+                <div className='rounded-lg border border-primary/20 bg-primary/5 p-3'>
+                  <p className='mb-1 flex items-center gap-1 text-xs font-medium text-primary'>
+                    <SparklesIcon className='size-3.5' />
+                    {t(`feed.detail.lead.${analysis.verdict}`)}
+                  </p>
+                  <p className='text-sm leading-6'>{analysis.lead}</p>
+                </div>
+              ) : null}
+              <dl className='grid gap-3 text-sm sm:grid-cols-2'>
+                <Fact
+                  label={t('feed.detail.interest')}
+                  value={t(`feed.levels.${analysis.interestLevel}`, {
+                    defaultValue: analysis.interestLevel,
                   })}
-                </StatusBadge>
-                <span className='min-w-0 flex-1 text-xs text-muted-foreground'>
-                  {noteText(t, coverage.note)}
-                </span>
-              </li>
-            ) : null,
+                  detail={analysis.interestReason}
+                />
+                <Fact
+                  label={t('feed.detail.experience')}
+                  value={t(`feed.levels.${analysis.experienceLevel}`, {
+                    defaultValue: analysis.experienceLevel,
+                  })}
+                  detail={analysis.experienceReason}
+                />
+              </dl>
+              {analysis.steps.length > 0 ? (
+                <div className='flex flex-col gap-2'>
+                  <h4 className='text-xs font-medium text-muted-foreground'>
+                    {t('feed.detail.steps')}
+                  </h4>
+                  <ol className='flex flex-col gap-2'>
+                    {/* Steps and comments have no ids and never reorder, so their position is their identity. */}
+                    {analysis.steps.map((step, index) => (
+                      // eslint-disable-next-line @eslint-react/no-array-index-key
+                      <li key={index} className='flex gap-3 text-sm'>
+                        <span className='flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs tabular-nums'>
+                          {index + 1}
+                        </span>
+                        <span>
+                          <span className='font-medium'>{step.title}</span>
+                          {step.detail ? (
+                            <span className='block text-muted-foreground'>
+                              {step.detail}
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+              {analysis.qualityDetail ? (
+                <TextBlock label={t('feed.detail.quality')}>
+                  {t('feed.detail.qualityAxes', analysis.qualityDetail)}
+                  {analysis.qualityDetail.noise !== 'none'
+                    ? ` · ${t(`feed.noise.${analysis.qualityDetail.noise}`)}`
+                    : ''}
+                </TextBlock>
+              ) : null}
+              {analysis.evidence ? (
+                <TextBlock label={t('feed.detail.evidence')}>
+                  {analysis.evidence}
+                </TextBlock>
+              ) : null}
+              {analysis.uncertainty ? (
+                <TextBlock label={t('feed.detail.uncertainty')}>
+                  {analysis.uncertainty}
+                </TextBlock>
+              ) : null}
+              <p className='text-xs text-muted-foreground'>
+                {analysis.engine === 'agent'
+                  ? t('feed.detail.byAgent', { agent: analysis.model ?? '—' })
+                  : analysis.engine === 'model'
+                    ? t('feed.detail.byModel', { model: analysis.model ?? '—' })
+                    : t('feed.detail.byRules')}
+                {' · '}
+                {relativeTime(analysis.createdAt, i18n.language)}
+              </p>
+              <FeedbackButtons
+                value={item.state.feedback}
+                busy={busy === 'feedback'}
+                disabled={Boolean(busy)}
+                onChange={(feedback) =>
+                  void patchState({ feedback }, 'feedback')
+                }
+              />
+            </>
+          ) : (
+            <p className='text-sm text-muted-foreground'>
+              {t('feed.detail.noAnalysis')}
+            </p>
           )}
-        </ul>
-      </section>
 
-      {item.body || item.summary ? (
-        <>
           <Separator />
-          <TextBlock label={t('feed.parts.body')} collapsible>
-            {item.body || item.summary}
-          </TextBlock>
-        </>
-      ) : null}
+
+          <section
+            aria-labelledby='feed-coverage'
+            className='flex flex-col gap-2'
+          >
+            <h4
+              id='feed-coverage'
+              className='text-xs font-medium text-muted-foreground'
+            >
+              {t('feed.detail.coverage')}
+            </h4>
+            <p className='text-xs text-muted-foreground'>
+              {t('feed.detail.coverageHint')}
+            </p>
+            <ul className='flex flex-col gap-2'>
+              {parts.map(([part, coverage]) =>
+                coverage ? (
+                  <li
+                    key={part}
+                    className='flex flex-wrap items-center gap-2 text-sm'
+                  >
+                    <span className='w-20 shrink-0 text-muted-foreground'>
+                      {t(`feed.parts.${part}`)}
+                    </span>
+                    <StatusBadge size='sm' tone={coverageTone(coverage.status)}>
+                      {t(`feed.coverage.${coverage.status}`, {
+                        defaultValue: coverage.status,
+                      })}
+                    </StatusBadge>
+                    <span className='min-w-0 flex-1 text-xs text-muted-foreground'>
+                      {noteText(t, coverage.note)}
+                    </span>
+                  </li>
+                ) : null,
+              )}
+            </ul>
+          </section>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <section
+        aria-label={t('feed.detail.content')}
+        className='flex flex-col gap-4'
+      >
+        <MediaGallery media={item.media} />
+        {text ? (
+          <ArticleText text={text} />
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            {item.media.length
+              ? t('feed.detail.mediaOnly')
+              : t('feed.detail.titleOnly')}
+          </p>
+        )}
+        {item.enrichable.length > 0 ? (
+          <Button
+            type='button'
+            size='xs'
+            variant='outline'
+            className='self-start'
+            disabled={Boolean(busy)}
+            onClick={() => void enrich()}
+          >
+            {busy === 'enrich' ? (
+              <Spinner data-icon='inline-start' />
+            ) : (
+              <DownloadIcon data-icon='inline-start' />
+            )}
+            {t('feed.detail.fetch', {
+              parts: item.enrichable
+                .map((part) => t(`feed.parts.${part}`))
+                .join(t('feed.common.listSeparator')),
+            })}
+          </Button>
+        ) : null}
+      </section>
 
       {item.comments.length > 0 ? (
         <section

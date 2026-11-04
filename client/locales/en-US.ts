@@ -187,6 +187,14 @@ const enUS = {
       transcript: 'Transcript',
       media: 'Images & video',
     },
+    media: {
+      cover: 'Cover image',
+      videoCover: 'Video cover',
+      image: 'Image {{index}} of {{count}}',
+      play: 'Play video',
+      openVideo: 'Open the video file',
+      unavailable: 'Image unavailable (the link may have expired)',
+    },
     coverage: {
       available: 'Read',
       partial: 'Partly read',
@@ -354,6 +362,9 @@ const enUS = {
       showMore: 'Show more',
       showLess: 'Show less',
       feedbackQuestion: 'Was this judgement useful?',
+      content: 'Original post',
+      titleOnly: 'Only the title has been read so far.',
+      mediaOnly: 'The post has no text besides its images or video.',
     },
     record: {
       title: 'Your notes',

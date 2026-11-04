@@ -174,6 +174,14 @@ const zhCN: AppResource = {
       transcript: '字幕',
       media: '图片与视频',
     },
+    media: {
+      cover: '封面图',
+      videoCover: '视频封面',
+      image: '第 {{index}} 张，共 {{count}} 张',
+      play: '播放视频',
+      openVideo: '打开视频文件',
+      unavailable: '图片无法加载（链接可能已过期）',
+    },
     coverage: {
       available: '已读取',
       partial: '部分读取',
@@ -331,6 +339,9 @@ const zhCN: AppResource = {
       showMore: '展开',
       showLess: '收起',
       feedbackQuestion: '这个判断有帮助吗？',
+      content: '原文',
+      titleOnly: '目前只读到了标题。',
+      mediaOnly: '这篇内容除图片或视频外没有文字。',
     },
     record: {
       title: '我的记录',

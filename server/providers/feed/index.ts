@@ -109,6 +109,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         const feed = this.app.container.resolve(feedServiceToken);
         await feed.settleAgentReads();
         await feed.runDue();
+        // Title-only items still waiting for their text (Xiaohongshu search), a few per tick.
+        await feed.prefetchWaiting();
       },
     });
     await this.executor.addJob({

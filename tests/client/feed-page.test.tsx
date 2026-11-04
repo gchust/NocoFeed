@@ -7,7 +7,7 @@ import {
   renderWithApp,
   type ApiCall,
 } from '@nocobase/app-testing/client';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,6 +39,9 @@ const listItem: FeedListItem = {
   gate: null,
   topicId: 1,
   lead: 'An open discussion where your experience applies.',
+  excerpt: null,
+  cover: null,
+  video: false,
   favorite: false,
   later: false,
   participated: false,
@@ -64,6 +67,7 @@ const detail: FeedItem = {
   body: 'We struggle to evaluate tool calls.',
   comments: [],
   transcript: [],
+  media: [],
   metrics: { points: 12 },
   coverage: {
     body: { status: 'available' },
@@ -95,6 +99,40 @@ const detail: FeedItem = {
   analysisStale: false,
   state,
   enrichable: ['comments'],
+};
+
+const CDN = 'https://sns-webpic-qc.xhscdn.com/202611040000/abc';
+
+/** A Xiaohongshu note: text in paragraphs, three pictures and nothing else to say about it than the analysis. */
+const noteDetail: FeedItem = {
+  ...detail,
+  id: 9,
+  platform: 'xiaohongshu',
+  sourceLabel: '手冲咖啡',
+  title: '在家做手冲的三个坑',
+  url: 'https://www.xiaohongshu.com/explore/0123456789abcdef01234567',
+  excerpt: '第一段：磨豆要均匀。',
+  cover: `${CDN}/1`,
+  body: '第一段：磨豆要均匀。\n还要称重。\n\n第二段：水温 92 度。',
+  media: [
+    { type: 'image', url: `${CDN}/1`, width: 1080, height: 1440 },
+    { type: 'image', url: `${CDN}/2` },
+    { type: 'image', url: `${CDN}/3` },
+  ],
+  enrichable: ['body', 'comments'],
+};
+
+const videoDetail: FeedItem = {
+  ...noteDetail,
+  id: 11,
+  video: true,
+  media: [
+    {
+      type: 'video',
+      url: 'https://sns-video-bd.xhscdn.com/stream/v.mp4',
+      cover: `${CDN}/cover`,
+    },
+  ],
 };
 
 let itemsResponse: unknown;
@@ -136,6 +174,22 @@ const api = vi.fn(({ method, path, query }: ApiCall) => {
   if (method === 'GET' && path === 'feedItems/7') return { data: detail };
   if (method === 'PATCH' && path === 'feedItems/7/state')
     return { data: { ...state, favorite: true } };
+  if (method === 'GET' && path === 'feedItems/9') return { data: noteDetail };
+  if (method === 'GET' && path === 'feedItems/11') return { data: videoDetail };
+  if (method === 'GET' && path === 'feedItems/10')
+    return {
+      data: {
+        ...noteDetail,
+        id: 10,
+        body: null,
+        media: [],
+        coverage: {
+          body: { status: 'missing', note: 'titleOnly' },
+          comments: { status: 'notRequested' },
+        },
+        enrichable: ['body', 'comments'],
+      },
+    };
   if (method === 'GET' && path === 'feedItems/8')
     return { data: { ...detail, id: 8, title: 'Second item' } };
   if (method === 'PATCH' && path === 'feedItems/8/state')
@@ -244,7 +298,17 @@ describe('feed page', () => {
       name: enUS.feed.state.favorite,
       pressed: false,
     });
+    // The analysis is one line until opened.
+    expect(
+      screen.queryByText(enUS.feed.detail.lead.discuss),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: new RegExp(enUS.feed.detail.analysis),
+      }),
+    );
     expect(screen.getByText(enUS.feed.detail.lead.discuss)).toBeInTheDocument();
+    expect(screen.getByText(enUS.feed.detail.coverage)).toBeInTheDocument();
     await userEvent.click(save);
 
     await waitFor(() =>
@@ -383,6 +447,107 @@ describe('feed page', () => {
         name: enUS.feed.density.compact,
         pressed: true,
       }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows a note’s opening and picture on its card', async () => {
+    // The density is remembered per browser; an earlier test chose the compact list.
+    localStorage.clear();
+    itemsResponse = {
+      data: [{ ...listItem, ...noteDetail, id: 9 }],
+      meta: {},
+    };
+    await renderAt('/');
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const card = await within(list).findByRole('button', {
+      name: /在家做手冲的三个坑/,
+    });
+    expect(card).toHaveTextContent('第一段：磨豆要均匀。');
+    // The opening of the post replaces the analysis' lead on the card.
+    expect(card).not.toHaveTextContent(listItem.lead!);
+    const cover = within(card).getByRole('img', {
+      name: enUS.feed.media.cover,
+    });
+    expect(cover).toHaveAttribute('src', `${CDN}/1`);
+    expect(cover).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('puts the original first: pictures, then the text in its paragraphs', async () => {
+    await renderAt('/?item=9');
+    const content = await screen.findByRole('region', {
+      name: enUS.feed.detail.content,
+    });
+    const paragraphs = within(content)
+      .getByTestId('feed-article-text')
+      .querySelectorAll('p');
+    expect([...paragraphs].map((p) => p.textContent)).toEqual([
+      '第一段：磨豆要均匀。\n还要称重。',
+      '第二段：水温 92 度。',
+    ]);
+
+    const gallery = within(content).getByRole('region', {
+      name: enUS.feed.parts.media,
+    });
+    const main = within(gallery).getByRole('img', { name: 'Image 1 of 3' });
+    expect(main).toHaveAttribute('src', `${CDN}/1`);
+    expect(main).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await userEvent.click(
+      within(gallery).getByRole('button', { name: 'Image 3 of 3' }),
+    );
+    expect(
+      within(gallery).getByRole('img', { name: 'Image 3 of 3' }),
+    ).toHaveAttribute('src', `${CDN}/3`);
+
+    // The analysis comes before the post but as a single collapsed line.
+    const summary = screen.getByRole('button', {
+      name: new RegExp(enUS.feed.detail.analysis),
+      expanded: false,
+    });
+    expect(summary).toHaveTextContent(listItem.lead!);
+    expect(screen.queryByText(enUS.feed.detail.steps)).not.toBeInTheDocument();
+  });
+
+  it('says when a picture can no longer be loaded', async () => {
+    await renderAt('/?item=9');
+    const content = await screen.findByRole('region', {
+      name: enUS.feed.detail.content,
+    });
+    fireEvent.error(within(content).getByRole('img', { name: 'Image 1 of 3' }));
+    expect(
+      await within(content).findByRole('img', {
+        name: enUS.feed.media.unavailable,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('plays a video from its cover and links the file', async () => {
+    await renderAt('/?item=11');
+    const play = await screen.findByRole('button', {
+      name: enUS.feed.media.play,
+    });
+    expect(
+      within(play).getByRole('img', { name: enUS.feed.media.videoCover }),
+    ).toHaveAttribute('src', `${CDN}/cover`);
+    expect(
+      screen.getByRole('link', { name: enUS.feed.media.openVideo }),
+    ).toHaveAttribute('href', 'https://sns-video-bd.xhscdn.com/stream/v.mp4');
+    await userEvent.click(play);
+    expect(document.querySelector('video')).toHaveAttribute(
+      'src',
+      'https://sns-video-bd.xhscdn.com/stream/v.mp4',
+    );
+  });
+
+  it('offers to fetch the text of a title-only note', async () => {
+    await renderAt('/?item=10');
+    const content = await screen.findByRole('region', {
+      name: enUS.feed.detail.content,
+    });
+    expect(content).toHaveTextContent(enUS.feed.detail.titleOnly);
+    expect(
+      within(content).getByRole('button', { name: 'Fetch Body, Comments' }),
     ).toBeInTheDocument();
   });
 });

@@ -47,6 +47,15 @@ Answer:
       "body": "…",
       "comments": [{ "author": "…", "text": "…", "depth": 0 }],
       "transcript": [{ "start": 12.5, "end": 15, "text": "…" }],
+      "media": [
+        { "type": "image", "url": "https://…", "width": 1080, "height": 1440 },
+        {
+          "type": "video",
+          "url": "https://…/v.mp4",
+          "cover": "https://…",
+          "duration": 42
+        }
+      ],
       "metrics": { "likes": 120, "comments": 8 },
       "publishedAt": "2026-10-28T08:00:00Z",
       "coverage": {
@@ -73,6 +82,12 @@ Answer:
   a platform sign-in. A platform that needs signing in is `200` with `needsLogin`.
 - Text targets are checked against `targetLength` in `server/providers/feed/catalog.ts` before a subscription is saved;
   keep those limits equal to what the Collector accepts.
+- `body` keeps the post's paragraphs: separate them with a blank line, keep single line breaks; NocoFeed shows the text
+  as it comes.
+- `media` (optional) lists the post's images and videos in display order. Only `https` links are kept, at most 30;
+  `cover` and `duration` apply to a video. They are the platform's own CDN links: NocoFeed neither downloads nor analyses
+  them, shows them with no `Referer`, and says when one no longer loads. Omit `media` when none was read: an omitted
+  list keeps what is stored, so a Collector that predates the field changes nothing.
 - Counts that are unknown are **omitted**, never `0`. `coverage` states, per part, what was read (`available`,
   `partial`, `missing`, `unavailable`, `notRequested`, `failed`) and why (`note`). The analysis only reasons about parts
   marked as read.
@@ -90,7 +105,8 @@ Fetches more material for one stored item when the person asks for it.
 }
 ```
 
-Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "coverage": {…} } }`
-with only the parts it obtained. A part that could not be fetched is reported in `coverage` with its reason; earlier
+Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "media": […], "coverage": {…} } }`
+with only the parts it obtained. `media` comes with `body` (it is read from the same page) and replaces the stored list
+when present. A part that could not be fetched is reported in `coverage` with its reason; earlier
 material is kept. An empty `comments` list replaces stored comments only when `coverage.comments` is `available`
 (the thread was read and has none); report an unreadable post as `failed`/`notFound`, not as an empty thread.
