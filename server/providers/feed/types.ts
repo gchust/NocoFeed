@@ -65,6 +65,11 @@ export interface CollectedItem {
   media?: MediaEntry[];
   metrics?: Record<string, number>;
   publishedAt?: string;
+  /**
+   * `publishedAt` was worked out from relative text such as "3 weeks ago" (YouTube search) rather than read as a date:
+   * the latest moment the text allows. Absent means exact.
+   */
+  publishedAtApproximate?: boolean;
   coverage: ItemCoverage;
 }
 
@@ -127,7 +132,8 @@ export interface EnrichRequest {
   platform: string;
   externalId: string;
   url?: string | null;
-  want: readonly ('body' | 'comments' | 'transcript')[];
+  /** `published` asks for the exact publication time of an item stored without one or with an approximate one. */
+  want: readonly ('body' | 'comments' | 'transcript' | 'published')[];
   signal: AbortSignal;
 }
 
@@ -139,6 +145,8 @@ export interface EnrichResult {
   transcript?: TranscriptSegment[];
   /** Read along with the body; absent when nothing was read, which keeps what is stored. */
   media?: MediaEntry[];
+  /** The exact publication time, when `published` was asked for and the page gave one. */
+  publishedAt?: string;
   coverage: Partial<ItemCoverage>;
 }
 

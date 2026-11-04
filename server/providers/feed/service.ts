@@ -217,7 +217,10 @@ export interface FeedListItem {
   title: string;
   summary: string | null;
   url: string | null;
+  /** Null when the platform gave no time: `createdAt` is then when it was collected, not when it was published. */
   publishedAt: string | null;
+  /** `publishedAt` was worked out from relative text ("3 weeks ago") and is only roughly right. */
+  publishedApproximate: boolean;
   createdAt: string;
   verdict: Analysis['verdict'] | null;
   score: number;
@@ -454,6 +457,16 @@ const PREFETCH_STOPS = new Set([
   'rateLimited',
   'unconfigured',
 ]);
+/**
+ * Looking up the exact publication time of items whose platform list gave none or only "3 weeks ago" (YouTube search):
+ * a few videos per scheduled tick, one Collector call per video for every owner's copy, items collected in the last
+ * 30 days, each video at most once a day.
+ */
+const PUBLISHED_PLATFORMS = ['youtube'];
+const PUBLISHED_PER_TICK = 5;
+const PUBLISHED_BUDGET_MS = 60_000;
+const PUBLISHED_WINDOW_MS = 30 * 24 * 60 * 60_000;
+const PUBLISHED_RECHECK_MS = 24 * 60 * 60_000;
 const EXCERPT_LENGTH = 280;
 /** Rows changed per statement by "Mark all as read", well under every database's bound-parameter limit. */
 const READ_BATCH = 200;
@@ -1377,7 +1390,11 @@ export function createFeedService(deps: FeedServiceDeps) {
               coverage: item.coverage,
               contentVersion: 1,
               publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
-              // Where it sits in time: when published, else now (see the time-window migration).
+              publishedApproximate: Boolean(
+                item.publishedAt && item.publishedAtApproximate,
+              ),
+              // Where it sits in time: when published, else now (see the time-window migration). A time that is
+              // missing or approximate is replaced by the exact one later (`resolvePublishedTimes`).
               timelineAt: item.publishedAt ? new Date(item.publishedAt) : now,
               fetchedAt: now,
               createdAt: now,
@@ -2358,6 +2375,103 @@ export function createFeedService(deps: FeedServiceDeps) {
     return fetched;
   }
 
+  /**
+   * Replaces a missing or approximate publication time with the exact one the Collector reads from the item's page, and
+   * moves the item to that time in the feed. Every owner's copy of a video is updated by one lookup. A lookup that
+   * found nothing is not repeated for a day; one the Collector could not make (sign-in, rate limit, no Collector) is
+   * tried again on the next tick. Returns how many videos got an exact time.
+   */
+  async function resolvePublishedTimes({
+    limit = PUBLISHED_PER_TICK,
+    now = new Date(),
+  }: { limit?: number; now?: Date } = {}): Promise<number> {
+    if (!adapters.collectorConfigured()) return 0;
+    const rows = await database
+      .query()
+      .selectFrom('feedItems')
+      .select(['id', 'platform', 'externalId', 'url'])
+      .where('platform', 'in', PUBLISHED_PLATFORMS)
+      .where((eb) =>
+        eb.or([
+          eb('publishedAt', 'is', null),
+          eb('publishedApproximate', '=', true),
+        ]),
+      )
+      .where((eb) =>
+        eb.or([
+          eb('publishedCheckedAt', 'is', null),
+          eb(
+            'publishedCheckedAt',
+            '<',
+            new Date(now.getTime() - PUBLISHED_RECHECK_MS),
+          ),
+        ]),
+      )
+      .where('createdAt', '>=', new Date(now.getTime() - PUBLISHED_WINDOW_MS))
+      .orderBy('id', 'desc')
+      .limit(limit * 5)
+      .execute<Row>();
+    const deadline = Date.now() + PUBLISHED_BUDGET_MS;
+    const seen = new Set<string>();
+    let asked = 0;
+    let resolved = 0;
+    for (const row of rows) {
+      if (asked >= limit || Date.now() >= deadline) break;
+      const platform = String(row.platform);
+      const externalId = String(row.externalId);
+      if (seen.has(`${platform}:${externalId}`)) continue;
+      seen.add(`${platform}:${externalId}`);
+      asked += 1;
+      let result: EnrichResult;
+      try {
+        result = await adapters.enrich({
+          platform,
+          externalId,
+          url: (row.url as string | null) ?? null,
+          want: ['published'],
+          signal: AbortSignal.timeout(MAX_RUN_MS),
+        });
+      } catch (error) {
+        deps.log('warn', 'feed published time lookup failed', {
+          itemId: Number(row.id),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        break;
+      }
+      // Nothing about the item: leave it to be tried again on the next tick, and spare the platform until then.
+      if (PREFETCH_STOPS.has(result.status)) break;
+      const ok = result.status === 'ok' || result.status === 'partial';
+      const published =
+        ok && result.publishedAt ? new Date(result.publishedAt) : null;
+      const exact =
+        published && Number.isFinite(published.getTime()) ? published : null;
+      await database
+        .query()
+        .updateTable('feedItems')
+        .set(
+          exact
+            ? {
+                publishedAt: exact,
+                publishedApproximate: false,
+                timelineAt: exact,
+                publishedCheckedAt: now,
+              }
+            : { publishedCheckedAt: now },
+        )
+        .where('platform', '=', platform)
+        .where('externalId', '=', externalId)
+        .where((eb) =>
+          eb.or([
+            eb('publishedAt', 'is', null),
+            eb('publishedApproximate', '=', true),
+          ]),
+        )
+        .execute();
+      if (exact) resolved += 1;
+    }
+    return resolved;
+  }
+
   function enrichableFor(
     platform: string,
     operation: string | null,
@@ -2485,6 +2599,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     summary: (row.summary as string | null) ?? null,
     url: (row.url as string | null) ?? null,
     publishedAt: iso(row.publishedAt),
+    publishedApproximate: Boolean(row.publishedAt && row.publishedApproximate),
     createdAt: iso(row.createdAt) ?? '',
     verdict: (analysis?.verdict as FeedListItem['verdict']) ?? null,
     score: Number(analysis?.score ?? 0),
@@ -2644,6 +2759,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           'media',
           'url',
           'publishedAt',
+          'publishedApproximate',
           'createdAt',
         ])
         .where('ownerId', '=', ownerId)
@@ -3280,6 +3396,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     markAllRead,
     enrichItem,
     prefetchWaiting,
+    resolvePublishedTimes,
     reanalyzeItem,
     settleAgentReads,
     itemOwners,

@@ -111,6 +111,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         await feed.runDue();
         // Title-only items still waiting for their text (Xiaohongshu search), a few per tick.
         await feed.prefetchWaiting();
+        // Exact publication times for items whose list gave none or only "3 weeks ago" (YouTube search).
+        await feed.resolvePublishedTimes();
       },
     });
     await this.executor.addJob({

@@ -342,3 +342,120 @@ describe('storedExternalId', () => {
     expect(storedExternalId(long).length).toBeLessThanOrEqual(191);
   });
 });
+
+describe('Collector publication times', () => {
+  const search = (adapters = createAdapters(config)) =>
+    adapters.collect({
+      platform: 'youtube',
+      operation: 'keyword',
+      target: 'nocobase',
+      limit: 20,
+      cursor: null,
+      knownIds: new Set(),
+      signal: new AbortController().signal,
+    });
+  const lookup = (adapters = createAdapters(config), platform = 'youtube') =>
+    adapters.enrich({
+      platform,
+      externalId: 'PPl884-BKWY',
+      url: 'https://www.youtube.com/watch?v=PPl884-BKWY',
+      want: ['published'],
+      signal: new AbortController().signal,
+    });
+
+  it('keeps an approximate time marked as such, and only with a time', async () => {
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        items: [
+          {
+            externalId: 'a',
+            title: 'Approximate',
+            publishedAt: '2026-10-14T12:00:00.000Z',
+            publishedAtApproximate: true,
+            coverage: {},
+          },
+          {
+            externalId: 'b',
+            title: 'Exact',
+            publishedAt: '2026-10-14T12:00:00+02:00',
+            coverage: {},
+          },
+          {
+            externalId: 'c',
+            title: 'Flag without a time',
+            publishedAtApproximate: true,
+            coverage: {},
+          },
+          {
+            externalId: 'd',
+            title: 'Not a time',
+            publishedAt: '3 weeks ago',
+            publishedAtApproximate: true,
+            coverage: {},
+          },
+        ],
+      },
+    });
+    const result = await search();
+    expect(
+      result.items.map((item) => [
+        item.externalId,
+        item.publishedAt,
+        item.publishedAtApproximate,
+      ]),
+    ).toEqual([
+      ['a', '2026-10-14T12:00:00.000Z', true],
+      ['b', '2026-10-14T10:00:00.000Z', undefined],
+      ['c', undefined, undefined],
+      ['d', undefined, undefined],
+    ]);
+  });
+
+  it('asks the Collector for the exact time of a YouTube video and passes on only the time', async () => {
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        item: {
+          publishedAt: '2026-10-09T04:00:33-07:00',
+          body: 'not asked for',
+          coverage: { body: { status: 'available' } },
+        },
+      },
+    });
+    const result = await lookup();
+    expect(received.map((entry) => entry.body)).toEqual([
+      {
+        platform: 'youtube',
+        externalId: 'PPl884-BKWY',
+        url: 'https://www.youtube.com/watch?v=PPl884-BKWY',
+        want: ['published'],
+      },
+    ]);
+    expect(result).toMatchObject({
+      status: 'ok',
+      publishedAt: '2026-10-09T11:00:33.000Z',
+      coverage: {},
+    });
+    expect(result.body).toBeUndefined();
+  });
+
+  it('does not ask for it on other platforms', async () => {
+    const result = await lookup(createAdapters(config), 'x');
+    expect(result.status).toBe('unsupported');
+    expect(received).toHaveLength(0);
+  });
+
+  it('leaves an older Collector that refuses it alone for a while', async () => {
+    answer = () => ({ status: 400, body: { error: 'invalidRequest' } });
+    const adapters = createAdapters(config);
+    expect(await lookup(adapters)).toMatchObject({
+      status: 'unsupported',
+      message: 'unsupportedPart',
+    });
+    expect(await lookup(adapters)).toMatchObject({ status: 'unsupported' });
+    expect(received).toHaveLength(1);
+  });
+});

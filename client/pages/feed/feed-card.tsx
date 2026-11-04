@@ -10,8 +10,7 @@ import type { ReactElement } from 'react';
 import { cn } from 'cn';
 
 import { CoverThumbnail } from './content.js';
-import { relativeTime } from './format.js';
-import { PlatformBadge, VerdictBadge } from './parts.js';
+import { ItemTime, PlatformBadge, VerdictBadge } from './parts.js';
 import type { FeedListItem } from './types.js';
 
 export type Density = 'comfortable' | 'compact';
@@ -64,9 +63,7 @@ function ComfortableCard({
           {item.sourceLabel ?? '—'}
         </span>
         <span aria-hidden='true'>·</span>
-        <time dateTime={item.publishedAt ?? item.createdAt}>
-          {relativeTime(item.publishedAt ?? item.createdAt, language)}
-        </time>
+        <ItemTime item={item} language={language} />
         <NewReplies count={item.newReplies} className='ml-auto' />
       </span>
       {/* The post first: its title, the opening of its text and its picture; the analysis is one line under it. */}
@@ -174,12 +171,11 @@ function CompactRow({
       <span className='w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums'>
         {item.verdict ? Math.round(item.score) : '—'}
       </span>
-      <time
-        dateTime={item.publishedAt ?? item.createdAt}
-        className='hidden w-24 shrink-0 truncate text-right text-xs whitespace-nowrap text-muted-foreground sm:block'
-      >
-        {relativeTime(item.publishedAt ?? item.createdAt, language)}
-      </time>
+      <ItemTime
+        item={item}
+        language={language}
+        className='hidden w-28 shrink-0 truncate text-right text-xs whitespace-nowrap text-muted-foreground sm:block'
+      />
     </button>
   );
 }

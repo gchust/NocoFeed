@@ -104,6 +104,14 @@ const enUS = {
         newest: 'Newest first',
       },
     },
+    time: {
+      approximate: 'about {{time}}',
+      approximateHint:
+        'The platform only said something like "3 weeks ago": published around {{time}}. The exact time is looked up later.',
+      collected: 'collected {{time}}',
+      collectedHint:
+        'The platform gave no publication time; this is when it was collected: {{time}}',
+    },
     read: {
       unreadOnly: 'Unread only',
       markAllRead: 'Mark all as read',

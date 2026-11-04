@@ -7,8 +7,27 @@ import { StatusBadge } from '#components/status-badge';
 import { Alert, AlertAction, AlertDescription } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
 
-import { requestProblem, statusTone } from './format.js';
-import type { Platform, Source, Verdict } from './types.js';
+import { itemTime, requestProblem, statusTone } from './format.js';
+import type { FeedListItem, Platform, Source, Verdict } from './types.js';
+
+/** When the item was published, said to be approximate or the collection time when that is all there is. */
+export function ItemTime({
+  item,
+  language,
+  className,
+}: {
+  readonly item: FeedListItem;
+  readonly language: string;
+  readonly className?: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  const time = itemTime(t, item, language);
+  return (
+    <time dateTime={time.dateTime} title={time.title} className={className}>
+      {time.text}
+    </time>
+  );
+}
 
 export function PlatformBadge({
   platform,
