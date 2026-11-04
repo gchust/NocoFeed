@@ -257,6 +257,12 @@ export const ListItemsQuery = z.object({
   pageToken: z.string().max(64).optional(),
 });
 
+export const FeedSummaryQuery = ListItemsQuery.pick({
+  platform: true,
+  topicId: true,
+  q: true,
+});
+
 export const FeedListItemSchema = z
   .object({
     id: z.number().int(),

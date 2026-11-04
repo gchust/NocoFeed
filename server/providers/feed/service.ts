@@ -1985,6 +1985,74 @@ export function createFeedService(deps: FeedServiceDeps) {
   });
 
   /**
+   * The items one view shows under the given filters, without a selection. The list and its counts share it, so a
+   * count is always the number of items the same filters list.
+   */
+  function feedQuery(
+    ownerId: string,
+    query: {
+      /** Omitted: every item the filters match, whatever its verdict or state. */
+      view?: FeedView;
+      platform?: string;
+      topicId?: number;
+      q?: string;
+      since?: Date;
+    },
+  ) {
+    let builder = database
+      .query()
+      .selectFrom('feedItems as i')
+      .leftJoin('feedAnalyses as a', (join) =>
+        join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
+      )
+      .leftJoin('feedItemStates as s', (join) =>
+        join.onRef('s.itemId', '=', 'i.id').on('s.ownerId', '=', ownerId),
+      )
+      .where('i.ownerId', '=', ownerId);
+
+    switch (query.view) {
+      case 'discuss':
+      case 'learn':
+        builder = builder.where('a.verdict', '=', query.view);
+        break;
+      case 'saved':
+        builder = builder.where('s.favorite', '=', true);
+        break;
+      case 'later':
+        builder = builder.where('s.later', '=', true);
+        break;
+      case 'participated':
+        builder = builder.where('s.participated', '=', true);
+        break;
+      case 'all':
+        builder = builder.where('a.verdict', 'in', ['discuss', 'learn']);
+        break;
+      default:
+        break;
+    }
+    // Dismissed items leave the feed; what the person kept on purpose stays in its own view.
+    if (query.view && ['all', 'discuss', 'learn'].includes(query.view))
+      builder = builder.where((eb) =>
+        eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
+      );
+    if (query.since) builder = builder.where('i.createdAt', '>=', query.since);
+    if (query.platform)
+      builder = builder.where('i.platform', '=', query.platform);
+    if (query.topicId) builder = builder.where('a.topicId', '=', query.topicId);
+    if (query.q?.trim()) {
+      const pattern = `%${query.q.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+      builder = builder.where((eb) =>
+        eb.or([
+          eb('i.title', 'like', pattern),
+          eb('i.summary', 'like', pattern),
+          eb('i.sourceLabel', 'like', pattern),
+        ]),
+      );
+    }
+    return builder;
+  }
+
+  /**
    * One page of the feed: items with their current analysis and the person's state, filtered in SQL, sorted by
    * value then recency, paged by offset behind an opaque token. Three queries regardless of the page size.
    */
@@ -2007,55 +2075,8 @@ export function createFeedService(deps: FeedServiceDeps) {
           Number(Buffer.from(query.pageToken, 'base64url').toString()) || 0,
         )
       : 0;
-    let builder = database
-      .query()
-      .selectFrom('feedItems as i')
-      .leftJoin('feedAnalyses as a', (join) =>
-        join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
-      )
-      .leftJoin('feedItemStates as s', (join) =>
-        join.onRef('s.itemId', '=', 'i.id').on('s.ownerId', '=', ownerId),
-      )
+    const page = await feedQuery(ownerId, query)
       .select(['i.id as id', 'a.priority as priority'])
-      .where('i.ownerId', '=', ownerId);
-
-    switch (query.view) {
-      case 'discuss':
-      case 'learn':
-        builder = builder.where('a.verdict', '=', query.view);
-        break;
-      case 'saved':
-        builder = builder.where('s.favorite', '=', true);
-        break;
-      case 'later':
-        builder = builder.where('s.later', '=', true);
-        break;
-      case 'participated':
-        builder = builder.where('s.participated', '=', true);
-        break;
-      default:
-        builder = builder.where('a.verdict', 'in', ['discuss', 'learn']);
-    }
-    // Dismissed items leave the feed; what the person kept on purpose stays in its own view.
-    if (['all', 'discuss', 'learn'].includes(query.view))
-      builder = builder.where((eb) =>
-        eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
-      );
-    if (query.since) builder = builder.where('i.createdAt', '>=', query.since);
-    if (query.platform)
-      builder = builder.where('i.platform', '=', query.platform);
-    if (query.topicId) builder = builder.where('a.topicId', '=', query.topicId);
-    if (query.q?.trim()) {
-      const pattern = `%${query.q.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-      builder = builder.where((eb) =>
-        eb.or([
-          eb('i.title', 'like', pattern),
-          eb('i.summary', 'like', pattern),
-          eb('i.sourceLabel', 'like', pattern),
-        ]),
-      );
-    }
-    const page = await builder
       .orderBy('a.priority', 'desc')
       .orderBy('i.id', 'desc')
       .limit(query.pageSize + 1)
@@ -2128,59 +2149,37 @@ export function createFeedService(deps: FeedServiceDeps) {
     };
   }
 
-  async function summary(ownerId: string): Promise<FeedSummary> {
-    const countStates = async (
-      field: 'favorite' | 'later' | 'participated',
-    ) => {
-      const [row] = await database
-        .query()
-        .selectFrom('feedItemStates')
-        .select((eb) => [eb.fn.count('id').as('n')])
-        .where('ownerId', '=', ownerId)
-        .where(field, '=', true)
+  /**
+   * How many items each view shows under the same platform, topic and search filters as the list, so the rail
+   * counts what the person can actually see.
+   */
+  async function summary(
+    ownerId: string,
+    filters: { platform?: string; topicId?: number; q?: string } = {},
+  ): Promise<FeedSummary> {
+    const count = async (view: FeedView) => {
+      const [row] = await feedQuery(ownerId, { ...filters, view })
+        .select((eb) => [eb.fn.count('i.id').as('n')])
         .execute();
       return Number((row as Row | undefined)?.n ?? 0);
     };
-    const [verdicts, saved, later, participated, replies, sources] =
+    const [all, discuss, learn, saved, later, participated, replies, sources] =
       await Promise.all([
-        database
-          .query()
-          .selectFrom('feedAnalyses as a')
-          .leftJoin('feedItemStates as s', (join) =>
-            join
-              .onRef('s.itemId', '=', 'a.itemId')
-              .on('s.ownerId', '=', ownerId),
-          )
-          .select((eb) => ['a.verdict as verdict', eb.fn.count('a.id').as('n')])
-          .where('a.ownerId', '=', ownerId)
-          .where('a.current', '=', true)
-          .where((eb) =>
-            eb.or([
-              eb('s.dismissed', 'is', null),
-              eb('s.dismissed', '=', false),
-            ]),
-          )
-          .groupBy('a.verdict')
-          .execute(),
-        countStates('favorite'),
-        countStates('later'),
-        countStates('participated'),
-        database
-          .query()
-          .selectFrom('feedItemStates')
-          .select((eb) => [eb.fn.count('id').as('n')])
-          .where('ownerId', '=', ownerId)
-          .where('followUpNew', '>', 0)
+        count('all'),
+        count('discuss'),
+        count('learn'),
+        count('saved'),
+        count('later'),
+        count('participated'),
+        // A followed thread counts wherever the item sits, as it did before the filters applied.
+        feedQuery(ownerId, filters)
+          .select((eb) => [eb.fn.count('i.id').as('n')])
+          .where('s.followUpNew', '>', 0)
           .execute(),
         listSources(ownerId),
       ]);
-    const byVerdict = new Map(
-      (verdicts as Row[]).map((row) => [String(row.verdict), Number(row.n)]),
-    );
-    const discuss = byVerdict.get('discuss') ?? 0;
-    const learn = byVerdict.get('learn') ?? 0;
     return {
-      all: discuss + learn,
+      all,
       discuss,
       learn,
       saved,

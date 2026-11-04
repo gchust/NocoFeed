@@ -30,6 +30,7 @@ import {
   FeedRunStatsSchema,
   FeedSourceSchema,
   FeedStateChangeSchema,
+  FeedSummaryQuery,
   FeedSummarySchema,
   FeedTopicSchema,
   TopicRunSchema,
@@ -433,6 +434,8 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       describeRoute({
         tags: ['Feed'],
         summary: 'Count my feed by view',
+        description:
+          'Each count is the number of items the view lists under the same platform, topic and search filters.',
         operationId: 'getFeedSummary',
         responses: {
           '200': dataResponse(FeedSummarySchema),
@@ -440,8 +443,14 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           '500': errors['500'],
         },
       }),
+      apiValidator('query', FeedSummaryQuery),
       async (context) =>
-        context.json({ data: await feed().summary(ownerOf(context)) }),
+        context.json({
+          data: await feed().summary(
+            ownerOf(context),
+            context.req.valid('query'),
+          ),
+        }),
     );
     items.get(
       '/:id',

@@ -99,12 +99,13 @@ const detail: FeedItem = {
 
 let itemsResponse: unknown;
 let summaryUnhealthy = 0;
-const api = vi.fn(({ method, path }: ApiCall) => {
+const api = vi.fn(({ method, path, query }: ApiCall) => {
   if (method === 'GET' && path === 'feedItems') return itemsResponse;
   if (method === 'GET' && path === 'feedItems/summary')
     return {
       data: {
-        all: 1,
+        // A search narrows the counts the way it narrows the list.
+        all: query?.q ? 4 : 12,
         discuss: 1,
         learn: 0,
         saved: 0,
@@ -195,6 +196,43 @@ describe('feed page', () => {
         method: 'GET',
         path: 'feedItems',
         query: expect.objectContaining({ view: 'discuss' }),
+      }),
+    );
+  });
+
+  it('counts what the current filters show and follows a new search', async () => {
+    await renderAt('/?platform=hn&topic=1');
+
+    const rail = await screen.findByRole('navigation', {
+      name: enUS.feed.views.label,
+    });
+    const all = within(rail).getByRole('button', {
+      name: new RegExp(enUS.feed.views.all),
+    });
+    await waitFor(() => expect(all).toHaveTextContent('12'));
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: 'feedItems/summary',
+        query: expect.objectContaining({ platform: 'hn', topicId: '1' }),
+      }),
+    );
+
+    await userEvent.type(
+      screen.getByRole('searchbox', { name: enUS.feed.searchLabel }),
+      'agent{Enter}',
+    );
+
+    await waitFor(() => expect(all).toHaveTextContent('4'));
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: 'feedItems/summary',
+        query: expect.objectContaining({
+          platform: 'hn',
+          topicId: '1',
+          q: 'agent',
+        }),
       }),
     );
   });

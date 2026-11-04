@@ -179,28 +179,40 @@ export default function FeedPage(): ReactElement {
   const [countsVersion, setCountsVersion] = useState(0);
   const [summary, setSummary] = useState<FeedSummary>();
   const [topics, setTopics] = useState<readonly Topic[]>([]);
+  // The counts follow the platform, topic and search filters, so each view shows what it would list.
   useEffect(() => {
     const controller = new AbortController();
-    void Promise.all([
-      api.request<{ data: FeedSummary }>({
+    api
+      .request<{ data: FeedSummary }>({
         path: 'feedItems/summary',
+        query: { platform, topicId, q: q || undefined },
         signal: controller.signal,
-      }),
-      api.request<{ data: Topic[] }>({
+      })
+      .then(
+        ({ data }) => {
+          if (!controller.signal.aborted) setSummary(data);
+        },
+        // The counts are decoration; the list shows the load error.
+        () => undefined,
+      );
+    return () => controller.abort();
+  }, [api, reloadCount, countsVersion, platform, topicId, q]);
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .request<{ data: Topic[] }>({
         path: 'feedTopics',
         signal: controller.signal,
-      }),
-    ]).then(
-      ([summaryResponse, topicsResponse]) => {
-        if (controller.signal.aborted) return;
-        setSummary(summaryResponse.data);
-        setTopics(topicsResponse.data);
-      },
-      // The counts and topic names are decoration; the list shows the load error.
-      () => undefined,
-    );
+      })
+      .then(
+        ({ data }) => {
+          if (!controller.signal.aborted) setTopics(data);
+        },
+        // Topic names are decoration; the list shows the load error.
+        () => undefined,
+      );
     return () => controller.abort();
-  }, [api, reloadCount, countsVersion]);
+  }, [api, reloadCount]);
 
   const loading = view !== 'digest' && list?.key !== requestKey;
   const sameFilter = list?.key.startsWith(`${filterKey}:`) ?? false;

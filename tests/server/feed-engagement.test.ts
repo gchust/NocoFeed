@@ -197,6 +197,66 @@ test('the digest picks from the last day and a dismissed item leaves the feed', 
   });
 });
 
+test('the counts follow the platform, topic and search filters of the list', async ({
+  testApp,
+}) => {
+  const { admin, analysed } = await setUp(testApp);
+  const tools = await analysed({
+    externalId: '10',
+    title: 'Ask HN: How do you evaluate tool use in LLM agents?',
+    body: 'We struggle with evaluation of agents and tool calls.',
+  });
+  await analysed({
+    externalId: '11',
+    title: 'Show HN: An evaluation harness for LLM agents',
+    body: 'Evaluation of agents with replayed tool calls.',
+  });
+  await admin.fetch(
+    `/feedItems/${tools}/state`,
+    json('PATCH', { later: true }),
+  );
+
+  type Counts = { data: Record<string, number> };
+  const countsFor = async (filters: string) =>
+    (
+      (await (
+        await admin.fetch(`/feedItems/summary${filters}`)
+      ).json()) as Counts
+    ).data;
+  const listed = async (view: string, filters: string) =>
+    (
+      (await (
+        await admin.fetch(
+          `/feedItems?view=${view}${filters ? `&${filters}` : ''}`,
+        )
+      ).json()) as { data: unknown[] }
+    ).data.length;
+
+  const topics = (await (await admin.fetch('/feedTopics')).json()) as {
+    data: { id: number }[];
+  };
+  for (const filters of [
+    '',
+    'q=harness',
+    'q=nothing-matches-this',
+    'platform=reddit',
+    'platform=hn',
+    `topicId=${topics.data[0].id}`,
+  ]) {
+    const counts = await countsFor(filters ? `?${filters}` : '');
+    for (const view of ['all', 'discuss', 'learn', 'saved', 'later'])
+      expect(counts[view], `${view} ${filters}`).toBe(
+        await listed(view, filters),
+      );
+  }
+  expect((await countsFor('?q=harness')).later).toBe(0);
+  expect((await countsFor('?q=tool%20use')).later).toBe(1);
+  expect((await countsFor('?platform=reddit')).all).toBe(0);
+  expect(
+    (await admin.fetch('/feedItems/summary?platform=nowhere')).status,
+  ).toBe(400);
+});
+
 test('a joined Hacker News thread is followed and new replies are announced once', async ({
   testApp,
 }) => {
