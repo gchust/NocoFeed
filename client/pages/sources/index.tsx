@@ -8,6 +8,7 @@ import {
   PlayIcon,
   PlusIcon,
   RssIcon,
+  SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
 import { type ReactElement, useCallback, useEffect, useState } from 'react';
@@ -181,10 +182,19 @@ export default function SourcesPage(): ReactElement {
         title={t('sources.title')}
         description={t('sources.description')}
         actions={
-          <Link to='new' className={buttonVariants()}>
-            <PlusIcon data-icon='inline-start' />
-            {t('sources.create')}
-          </Link>
+          <>
+            <Link
+              to='recommended'
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              <SparklesIcon data-icon='inline-start' />
+              {t('sources.presets.open')}
+            </Link>
+            <Link to='new' className={buttonVariants()}>
+              <PlusIcon data-icon='inline-start' />
+              {t('sources.create')}
+            </Link>
+          </>
         }
       />
       {catalog ? <EngineNotice catalog={catalog} /> : null}
@@ -208,9 +218,14 @@ export default function SourcesPage(): ReactElement {
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Link to='new' className={buttonVariants()}>
-              {t('sources.create')}
-            </Link>
+            <div className='flex flex-wrap justify-center gap-2'>
+              <Link to='recommended' className={buttonVariants()}>
+                {t('sources.presets.open')}
+              </Link>
+              <Link to='new' className={buttonVariants({ variant: 'outline' })}>
+                {t('sources.create')}
+              </Link>
+            </div>
           </EmptyContent>
         </Empty>
       ) : null}

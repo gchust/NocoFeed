@@ -260,6 +260,17 @@ function Body({
       onSubmit={(event) => onSubmit(event)}
     >
       <FieldGroup>
+        {source ? null : (
+          <p className='rounded-lg border border-dashed p-3 text-sm text-muted-foreground'>
+            {t('sources.presets.fromForm')}{' '}
+            <Link
+              to='/sources/recommended'
+              className='text-primary hover:underline'
+            >
+              {t('sources.presets.open')}
+            </Link>
+          </p>
+        )}
         <Controller
           control={form.control}
           name='platform'

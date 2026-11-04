@@ -792,7 +792,14 @@ async function resolveChannelId(
   const page = await http.text(`https://www.youtube.com/${handle}`, signal, {
     'accept-language': 'en',
   });
+  // The page names many channels (recommended ones, the first `"channelId"` is often another channel), so read the
+  // markers that describe the page's own channel first: its canonical link, `externalId` and `itemprop="identifier"`.
   const found =
+    page.match(
+      /<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})"/,
+    )?.[1] ??
+    page.match(/"externalId":"(UC[A-Za-z0-9_-]{22})"/)?.[1] ??
+    page.match(/itemprop="identifier" content="(UC[A-Za-z0-9_-]{22})"/)?.[1] ??
     page.match(/"channelId":"(UC[A-Za-z0-9_-]{22})"/)?.[1] ??
     page.match(/channel\/(UC[A-Za-z0-9_-]{22})/)?.[1];
   if (!found) throw new AdapterError('failed', 'channelNotResolved');

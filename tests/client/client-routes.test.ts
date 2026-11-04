@@ -16,6 +16,7 @@ const FEED_PAGES = [
   'sources',
   'sourceCreate',
   'sourceEdit',
+  'sourceRecommended',
   'runs',
   'preferences',
 ];
