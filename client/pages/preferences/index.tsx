@@ -137,6 +137,8 @@ function ModelStatus({ catalog }: { readonly catalog: Catalog }): ReactElement {
 const NO_AGENT = 'none';
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+/** The time windows offered for collection, in days; 0 keeps everything. */
+const MAX_AGE_DAYS = [1, 3, 7, 14, 30, 90, 0];
 const hourLabel = (hour: number): string =>
   `${String(hour).padStart(2, '0')}:00`;
 
@@ -268,6 +270,7 @@ function PreferencesForm({
         digestEnabled: z.boolean(),
         digestHour: z.number().int().min(0).max(23),
         readerAgentId: z.string(),
+        maxAgeDays: z.number().int().min(0).max(365),
       }),
     [t],
   );
@@ -294,6 +297,23 @@ function PreferencesForm({
       });
     return items;
   }, [agentOptions, profile.readerAgentId, t]);
+  // A window set through the API that the list does not offer stays visible and selected.
+  const maxAgeItems = [
+    ...new Set(
+      [...MAX_AGE_DAYS, profile.maxAgeDays].filter((days) => days > 0),
+    ),
+  ]
+    .sort((a, b) => a - b)
+    .concat(0)
+    .map((days) => ({
+      value: days,
+      label:
+        days === 1
+          ? t('preferences.maxAge.day')
+          : days
+            ? t('preferences.maxAge.days', { count: days })
+            : t('preferences.maxAge.unlimited'),
+    }));
 
   const form = useForm({
     shouldFocusError: false,
@@ -307,6 +327,7 @@ function PreferencesForm({
       digestEnabled: profile.digestEnabled,
       digestHour: profile.digestHour,
       readerAgentId: profile.readerAgentId ?? NO_AGENT,
+      maxAgeDays: profile.maxAgeDays,
     },
   });
 
@@ -334,6 +355,7 @@ function PreferencesForm({
         digestEnabled: data.digestEnabled,
         digestHour: data.digestHour,
         readerAgentId: data.readerAgentId ?? NO_AGENT,
+        maxAgeDays: data.maxAgeDays,
       });
       toaster.show({
         type: 'success',
@@ -450,6 +472,43 @@ function PreferencesForm({
                     {t('preferences.hints.dailyLimit')}
                   </FieldDescription>
                   <FieldError errors={[fieldState.error]} />
+                </Field>
+              )}
+            />
+            <Controller
+              control={form.control}
+              name='maxAgeDays'
+              render={({ field }) => (
+                <Field className='max-w-xs'>
+                  <FieldLabel htmlFor={`${FORM_ID}-maxAgeDays`}>
+                    {t('preferences.fields.maxAgeDays')}
+                  </FieldLabel>
+                  <Select
+                    items={maxAgeItems}
+                    value={field.value}
+                    onValueChange={(value) =>
+                      field.onChange(Number(value ?? 0))
+                    }
+                  >
+                    <SelectTrigger
+                      id={`${FORM_ID}-maxAgeDays`}
+                      className='w-full'
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {maxAgeItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t('preferences.hints.maxAgeDays')}
+                  </FieldDescription>
                 </Field>
               )}
             />

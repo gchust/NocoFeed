@@ -10,6 +10,7 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611040001_feed_topic_searches.ts` (topic search terms, platforms, schedule; `feedSources.topicId`).
   `202611050001_feed_runner_agent.ts` (`feedProfiles.readerAgentId`, `feedRuns.agentRunId`/`agentResult`).
   `202611060001_feed_item_media.ts` (`feedItems.media`: images and video links, see "The post first" below).
+  `202611070001_feed_time_window.ts` (`feedProfiles.maxAgeDays`, `feedItems.timelineAt`).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -79,6 +80,22 @@ the person's topics and experience, and the person keeps their own marks and not
 - **Pages show the original.** The card shows title, the opening of the text and the cover, with the analysis as one
   line; the detail shows the analysis as one collapsed line (`Collapsible`) above the media gallery and the text in its
   paragraphs (`content.tsx`); the analysis details, feedback and the material read open from that line.
+
+## Time window
+
+- A feed is about what is new. `feedProfiles.maxAgeDays` (Preferences, 7 by default, 0 = keep everything) is how far
+  back a collected item may have been published. `collectWindow` in `service.ts` gives each list run a `cutoff` and a
+  `since`: the cutoff on the first run, afterwards a day before `lastSuccessAt` (`SINCE_OVERLAP_MS`), never before the
+  cutoff. Single-item operations have no window.
+- `since` goes to the adapters (`CollectRequest.since`); the Collector narrows platform searches with it (see
+  `docs/collector.md`), native lists are already newest first. `withinWindow` then drops every item published before
+  the cutoff (undated items stay) and, when it dropped one, clears `truncated`: the list reached past the window.
+- An item already stored (`ownerId`, `platform`, `externalId`) is never inserted or analysed again; only the run's new
+  ids go to `analyzeItems`.
+- `feedItems.timelineAt` is `publishedAt`, else the collection time; every insert sets it. The feed's `sort=newest` and
+  `period` (`day`/`week`/`month`, also on `/feedItems/summary`) use it, because the query builder has no `COALESCE`.
+- Tests: `tests/server/feed-time-window.test.ts`, `tests/database/feed-time-window-migration.test.ts`, the `since`
+  cases in `feed-collector-client.test.ts`.
 
 ## Rules that keep it honest
 

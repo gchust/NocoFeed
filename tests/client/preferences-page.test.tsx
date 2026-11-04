@@ -44,6 +44,7 @@ const profile: Profile = {
   digestHour: 8,
   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
   readerAgentId: null,
+  maxAgeDays: 7,
 };
 
 const catalog = {
@@ -126,5 +127,30 @@ describe('preferences page', () => {
       ([entry]) => entry.method === 'PUT' && entry.path === 'feedProfile',
     )!;
     expect(call.json).toMatchObject({ readerAgentId: null, avoid: 'Crypto' });
+  });
+
+  it('sets how far back collection reaches', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    const select = await screen.findByRole('combobox', {
+      name: enUS.preferences.fields.maxAgeDays,
+    });
+    expect(select.textContent).toContain('The past 7 days');
+    await user.click(select);
+    await user.click(
+      await screen.findByRole('option', { name: 'The past 24 hours' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          ([call]) => call.method === 'PUT' && call.path === 'feedProfile',
+        ),
+      ).toBe(true),
+    );
+    const [call] = api.mock.calls.find(
+      ([entry]) => entry.method === 'PUT' && entry.path === 'feedProfile',
+    )!;
+    expect(call.json).toMatchObject({ maxAgeDays: 1 });
   });
 });

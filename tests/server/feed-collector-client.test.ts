@@ -243,6 +243,62 @@ describe('Collector client', () => {
   });
 });
 
+describe('Collector time window', () => {
+  const since = new Date('2026-11-01T00:00:00Z');
+  const collectSince = (adapters = createAdapters(config)) =>
+    adapters.collect({
+      platform: 'xiaohongshu',
+      operation: 'keyword',
+      target: '咖啡',
+      limit: 20,
+      cursor: null,
+      knownIds: new Set(),
+      since,
+      signal: new AbortController().signal,
+    });
+
+  it('asks for what was published since the window starts', async () => {
+    answer = () => ({ status: 200, body: { status: 'ok', items: items('a') } });
+    const result = await collectSince();
+    expect(result.items.map((item) => item.externalId)).toEqual(['a']);
+    expect(received.map((entry) => entry.body)).toEqual([
+      {
+        platform: 'xiaohongshu',
+        operation: 'keyword',
+        target: '咖啡',
+        limit: 20,
+        cursor: null,
+        since: '2026-11-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('asks an older Collector that refuses since again without it, and keeps doing so for a while', async () => {
+    // An older Collector validates strictly: an unknown field is a 400.
+    answer = () => ({
+      status:
+        'since' in (received.at(-1)?.body as Record<string, unknown>)
+          ? 400
+          : 200,
+      body: { status: 'ok', items: items('a') },
+    });
+    const adapters = createAdapters(config);
+    expect((await collectSince(adapters)).status).toBe('ok');
+    expect((await collectSince(adapters)).status).toBe('ok');
+    expect(received.map((entry) => 'since' in (entry.body as object))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('does not retry other refusals', async () => {
+    answer = () => ({ status: 500, body: { error: 'boom' } });
+    expect((await collectSince()).status).toBe('failed');
+    expect(received).toHaveLength(1);
+  });
+});
+
 describe('storedExternalId', () => {
   it('keeps short ids and hashes long ones stably', () => {
     expect(storedExternalId('abc')).toBe('abc');

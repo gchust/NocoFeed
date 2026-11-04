@@ -82,6 +82,18 @@ const zhCN: AppResource = {
       allTopics: '全部主题',
       platform: '平台',
       topic: '主题',
+      period: '发布时间',
+      anyTime: '不限时间',
+      periods: {
+        day: '最近 24 小时',
+        week: '最近一周',
+        month: '最近一个月',
+      },
+      sort: '排序',
+      sorts: {
+        priority: '最值得看',
+        newest: '最新发布',
+      },
     },
     platforms: {
       reddit: 'Reddit',
@@ -629,6 +641,12 @@ const zhCN: AppResource = {
       digestEnabled: '每日简报',
       digestHour: '推送时间',
       readerAgentId: '“重新分析”使用的 Runner 智能体',
+      maxAgeDays: '只采集多久内发布的内容',
+    },
+    maxAge: {
+      day: '最近 24 小时',
+      days: '最近 {{count}} 天',
+      unlimited: '不限',
     },
     agent: {
       none: '不使用：由 AI 模型和规则分析',
@@ -651,6 +669,8 @@ const zhCN: AppResource = {
       digestEnabled:
         '每天把过去 24 小时最值得参与的 3 条和最值得学习的 1 条发到站内信；没有合适内容的日子不会打扰你。',
       digestHour: '按你的本地时间（{{zone}}）。',
+      maxAgeDays:
+        '订阅和主题搜索只保留这段时间内发布的内容，每次只取上次采集之后的新内容；已经采集过的不会重复获取和分析。',
       readerAgentId:
         'Runner 智能体会自己打开原文和讨论区，包括本服务器抓取不到的页面。未选择或它无法完成时，仍由模型和规则分析。',
       readerAgentIdEmpty:

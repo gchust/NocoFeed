@@ -41,6 +41,10 @@ export const FeedProfileSchema = z
       description:
         'The runner agent "Analyze again" is handed to; null analyses with the model and the rules',
     }),
+    maxAgeDays: z.number().int().meta({
+      description:
+        'Collection keeps items published within this many days; 0 keeps everything',
+    }),
   })
   .meta({ ref: 'FeedProfile' });
 
@@ -62,6 +66,10 @@ export const SaveProfileBody = z.strictObject({
     .boolean()
     .optional()
     .meta({ description: 'Forget the word weights learned from feedback' }),
+  maxAgeDays: z.number().int().min(0).max(365).optional().meta({
+    description:
+      'Keep collected items published within this many days; 0 keeps everything',
+  }),
 });
 
 // Sources
@@ -261,6 +269,14 @@ export const ListItemsQuery = z.object({
   platform: PLATFORM.optional(),
   topicId: z.coerce.number().int().positive().optional(),
   q: z.string().max(200).optional(),
+  period: z.enum(['day', 'week', 'month']).optional().meta({
+    description:
+      'Only items published (or, when the date is unknown, collected) in the last day, week or month',
+  }),
+  sort: z.enum(['priority', 'newest']).default('priority').meta({
+    description:
+      'priority: most worth reading first; newest: most recently published first',
+  }),
   pageSize: z.coerce.number().int().min(1).max(100).default(30),
   pageToken: z.string().max(64).optional(),
 });
@@ -269,6 +285,7 @@ export const FeedSummaryQuery = ListItemsQuery.pick({
   platform: true,
   topicId: true,
   q: true,
+  period: true,
 });
 
 export const FeedListItemSchema = z

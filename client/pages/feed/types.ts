@@ -26,6 +26,12 @@ export const VIEWS = [
   'participated',
 ] as const;
 export type FeedView = (typeof VIEWS)[number];
+
+/** How far back the list reaches by publication time; absent means any time. */
+export const PERIODS = ['day', 'week', 'month'] as const;
+export type FeedPeriod = (typeof PERIODS)[number];
+export const SORTS = ['priority', 'newest'] as const;
+export type FeedSort = (typeof SORTS)[number];
 export type ListView = Exclude<FeedView, 'digest'>;
 
 export const TOPIC_MODES = ['both', 'participate', 'learn'] as const;
@@ -47,6 +53,8 @@ export interface Profile {
   readonly timeZone: string | null;
   /** The runner agent "Analyze again" is handed to; null analyses with the model and the rules. */
   readonly readerAgentId: string | null;
+  /** Collection keeps items published within this many days; 0 keeps everything. */
+  readonly maxAgeDays: number;
 }
 
 export interface Topic {
