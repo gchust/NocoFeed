@@ -67,6 +67,8 @@ the person's topics and experience, and the person keeps their own marks and not
 - Every stored part carries coverage (`available`, `partial`, `missing`, …). The analysis states what it did not read;
   a new part bumps `contentVersion` and marks the analysis stale rather than silently rewriting it.
 - Counts that are unknown are absent, never `0`. A run that could not reach items seen before is `partial`.
+- The feed rail's view counts come from `GET /feedItems/summary` with the list's `platform`, `topicId` and `q`, and
+  `listItems` and `summary` share one query (`feedQuery`), so a count is always what that view lists under the filters.
 - Status messages, run errors and coverage notes are short codes translated in `feed.messages`/`feed.notes`; the
   client shows nothing for free text, which may be upstream HTML or an exception.
 - The model comes from the agents plugin's default chat model (System settings → AI models) and is capped per person per
