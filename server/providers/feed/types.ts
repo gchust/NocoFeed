@@ -35,6 +35,22 @@ export interface TranscriptSegment {
   text: string;
 }
 
+/**
+ * One image or video of a post, in display order: the platform's own (often signed) CDN link, never downloaded. Images
+ * and video frames are shown, not analysed.
+ */
+export interface MediaEntry {
+  type: 'image' | 'video';
+  /** https only. */
+  url: string;
+  width?: number;
+  height?: number;
+  /** A video's poster image (https). */
+  cover?: string;
+  /** A video's length in seconds. */
+  duration?: number;
+}
+
 /** One normalized item as an adapter returns it. Counts that are unknown stay absent; they are never 0. */
 export interface CollectedItem {
   externalId: string;
@@ -45,6 +61,8 @@ export interface CollectedItem {
   body?: string;
   comments?: CommentEntry[];
   transcript?: TranscriptSegment[];
+  /** Absent when the source gives none (and from Collectors that predate it). */
+  media?: MediaEntry[];
   metrics?: Record<string, number>;
   publishedAt?: string;
   coverage: ItemCoverage;
@@ -103,6 +121,8 @@ export interface EnrichResult {
   body?: string;
   comments?: CommentEntry[];
   transcript?: TranscriptSegment[];
+  /** Read along with the body; absent when nothing was read, which keeps what is stored. */
+  media?: MediaEntry[];
   coverage: Partial<ItemCoverage>;
 }
 

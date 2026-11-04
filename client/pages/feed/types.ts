@@ -151,6 +151,12 @@ export interface FeedListItem {
   readonly gate: AnalysisGate | null;
   readonly topicId: number | null;
   readonly lead: string | null;
+  /** The opening of the post's own text; null when only the title is known. */
+  readonly excerpt: string | null;
+  /** The first image or a video's cover (the platform's CDN link). */
+  readonly cover: string | null;
+  /** The post is a video. */
+  readonly video: boolean;
   readonly favorite: boolean;
   readonly later: boolean;
   readonly participated: boolean;
@@ -222,6 +228,16 @@ export interface Analysis {
 
 export type EnrichPart = 'body' | 'comments' | 'transcript';
 
+/** One image or video of a post, in display order: an https link on the platform's CDN. */
+export interface MediaEntry {
+  readonly type: 'image' | 'video';
+  readonly url: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly cover?: string;
+  readonly duration?: number;
+}
+
 export interface FeedItem extends FeedListItem {
   readonly externalId: string;
   readonly author: string | null;
@@ -236,6 +252,7 @@ export interface FeedItem extends FeedListItem {
     readonly end?: number;
     readonly text: string;
   }[];
+  readonly media: readonly MediaEntry[];
   readonly metrics: Readonly<Record<string, number>>;
   readonly coverage: {
     readonly body: PartCoverage;

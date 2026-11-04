@@ -9,6 +9,7 @@ import type { ReactElement } from 'react';
 
 import { cn } from 'cn';
 
+import { CoverThumbnail } from './content.js';
 import { relativeTime } from './format.js';
 import { PlatformBadge, VerdictBadge } from './parts.js';
 import type { FeedListItem } from './types.js';
@@ -66,15 +67,27 @@ function ComfortableCard({
         </time>
         <NewReplies count={item.newReplies} className='ml-auto' />
       </span>
-      <span className='line-clamp-2 text-[0.95rem] leading-snug font-medium'>
-        {item.title}
-      </span>
-      {item.lead ? (
-        <span className='line-clamp-2 text-sm text-muted-foreground'>
-          {item.lead}
+      {/* The post first: its title, the opening of its text and its picture; the analysis is one line under it. */}
+      <span className='flex w-full items-start gap-3'>
+        <span className='flex min-w-0 flex-1 flex-col gap-1'>
+          <span className='line-clamp-2 text-[0.95rem] leading-snug font-medium'>
+            {item.title}
+          </span>
+          {item.excerpt ? (
+            <span className='line-clamp-3 text-sm leading-6 whitespace-pre-line text-muted-foreground'>
+              {item.excerpt}
+            </span>
+          ) : item.lead ? (
+            <span className='line-clamp-2 text-sm text-muted-foreground'>
+              {item.lead}
+            </span>
+          ) : null}
         </span>
-      ) : null}
-      <span className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+        {item.cover ? (
+          <CoverThumbnail src={item.cover} video={item.video} />
+        ) : null}
+      </span>
+      <span className='flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground'>
         <VerdictBadge verdict={item.verdict} />
         {item.verdict ? (
           <span className='tabular-nums'>

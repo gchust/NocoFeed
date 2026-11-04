@@ -155,6 +155,71 @@ describe('Collector client', () => {
     expect(item?.url).toBeUndefined();
   });
 
+  it('keeps only https images and videos the browser may load', async () => {
+    const media = [
+      {
+        type: 'image',
+        url: 'https://sns-webpic-qc.xhscdn.com/a',
+        width: 1080,
+        height: 1440,
+      },
+      { type: 'image', url: 'http://sns-webpic-qc.xhscdn.com/b' },
+      { type: 'image', url: 'javascript:alert(1)' },
+      {
+        type: 'video',
+        url: 'https://sns-video-bd.xhscdn.com/v.mp4',
+        cover: 'data:x',
+        duration: 42,
+      },
+      { type: 'audio', url: 'https://sns-video-bd.xhscdn.com/a.mp3' },
+      { type: 'image', url: 'https://sns-webpic-qc.xhscdn.com/a' },
+    ];
+    answer = (path) => ({
+      status: 200,
+      body: path.endsWith('/v1/collect')
+        ? {
+            status: 'ok',
+            items: [
+              { externalId: 'a', title: 'A', media },
+              { externalId: 'b', title: 'B' },
+            ],
+          }
+        : {
+            status: 'ok',
+            item: {
+              body: '正文',
+              media,
+              coverage: { body: { status: 'available' } },
+            },
+          },
+    });
+    const expected = [
+      {
+        type: 'image',
+        url: 'https://sns-webpic-qc.xhscdn.com/a',
+        width: 1080,
+        height: 1440,
+      },
+      {
+        type: 'video',
+        url: 'https://sns-video-bd.xhscdn.com/v.mp4',
+        duration: 42,
+      },
+    ];
+    const [withMedia, without] = (await collect()).items;
+    expect(withMedia?.media).toEqual(expected);
+    // An older Collector sends none: nothing, not an empty list.
+    expect(without?.media).toBeUndefined();
+    const enriched = await createAdapters(config).enrich({
+      platform: 'xiaohongshu',
+      externalId: 'a',
+      url: 'https://www.xiaohongshu.com/explore/a',
+      want: ['body'],
+      signal: new AbortController().signal,
+    });
+    expect(enriched.media).toEqual(expected);
+  });
+
   it('keeps one translatable message when enrich combines two Collector calls', async () => {
     answer = () => ({
       status: 200,
