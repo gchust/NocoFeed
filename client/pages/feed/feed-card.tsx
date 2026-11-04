@@ -12,6 +12,7 @@ import { cn } from 'cn';
 import { CoverThumbnail } from './content.js';
 import { ItemTime, PlatformBadge, VerdictBadge } from './parts.js';
 import type { FeedListItem } from './types.js';
+import { youTubeThumbnail, youTubeVideoOf } from './youtube.js';
 
 export type Density = 'comfortable' | 'compact';
 
@@ -43,6 +44,9 @@ function ComfortableCard({
   onSelect,
 }: CardProps): ReactElement {
   const { t } = useTranslation();
+  // A YouTube video has no stored media: its thumbnail is derived from the video id.
+  const youtube = item.cover ? null : youTubeVideoOf(item);
+  const cover = item.cover ?? (youtube ? youTubeThumbnail(youtube.id) : null);
   return (
     <button
       type='button'
@@ -87,8 +91,8 @@ function ComfortableCard({
             </span>
           ) : null}
         </span>
-        {item.cover ? (
-          <CoverThumbnail src={item.cover} video={item.video} />
+        {cover ? (
+          <CoverThumbnail src={cover} video={item.video || Boolean(youtube)} />
         ) : null}
       </span>
       <span className='flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground'>

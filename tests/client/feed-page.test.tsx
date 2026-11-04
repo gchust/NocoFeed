@@ -138,6 +138,22 @@ const videoDetail: FeedItem = {
   ],
 };
 
+const YT = 'dQw4w9WgXcQ';
+
+/** A YouTube video from a channel feed: no stored media, the player and thumbnail come from the video id. */
+const youtubeDetail: FeedItem = {
+  ...detail,
+  id: 12,
+  platform: 'youtube',
+  sourceLabel: 'Some channel',
+  title: 'How agents use tools',
+  url: `https://www.youtube.com/watch?v=${YT}`,
+  externalId: `yt:video:${YT}`,
+  summary: 'The video description.',
+  body: null,
+  media: [],
+};
+
 let itemsResponse: unknown;
 let summaryUnhealthy = 0;
 // The person's marks as the server keeps them: each PATCH changes only what it sends.
@@ -195,6 +211,25 @@ const api = vi.fn(({ method, path, query, json }: ApiCall) => {
     return { data: { marked: 5 } };
   if (method === 'GET' && path === 'feedItems/9') return { data: noteDetail };
   if (method === 'GET' && path === 'feedItems/11') return { data: videoDetail };
+  if (method === 'GET' && path === 'feedItems/12')
+    return { data: youtubeDetail };
+  if (method === 'GET' && path === 'feedItems/13')
+    return {
+      data: {
+        ...youtubeDetail,
+        id: 13,
+        url: `https://www.youtube.com/shorts/${YT}?feature=share`,
+      },
+    };
+  if (method === 'GET' && path === 'feedItems/14')
+    return {
+      data: {
+        ...youtubeDetail,
+        id: 14,
+        url: 'https://www.youtube.com/@channel',
+        externalId: 'yt:channel:none',
+      },
+    };
   if (method === 'GET' && path === 'feedItems/10')
     return {
       data: {
@@ -812,6 +847,93 @@ describe('feed page', () => {
       'src',
       'https://sns-video-bd.xhscdn.com/stream/v.mp4',
     );
+  });
+
+  it('shows a YouTube video’s thumbnail and play mark on its card', async () => {
+    localStorage.clear();
+    itemsResponse = {
+      data: [{ ...listItem, ...youtubeDetail, cover: null, video: false }],
+      meta: {},
+    };
+    await renderAt('/');
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const card = await within(list).findByRole('button', {
+      name: /How agents use tools/,
+    });
+    const cover = within(card).getByRole('img', {
+      name: enUS.feed.media.videoCover,
+    });
+    expect(cover).toHaveAttribute(
+      'src',
+      `https://i.ytimg.com/vi/${YT}/hqdefault.jpg`,
+    );
+    expect(cover).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('plays a YouTube video in place, loading the player only on click', async () => {
+    await renderAt('/?item=12');
+    const player = await screen.findByTestId('feed-youtube');
+    expect(player.querySelector('iframe')).toBeNull();
+    const play = within(player).getByRole('button', {
+      name: enUS.feed.media.play,
+    });
+    expect(
+      within(play).getByRole('img', { name: enUS.feed.media.videoCover }),
+    ).toHaveAttribute('src', `https://i.ytimg.com/vi/${YT}/hqdefault.jpg`);
+    expect(
+      within(player).getByRole('link', { name: enUS.feed.media.openYouTube }),
+    ).toHaveAttribute('href', `https://www.youtube.com/watch?v=${YT}`);
+    expect(play.parentElement).toHaveClass('aspect-video');
+
+    await userEvent.click(play);
+    const frame = player.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    expect(frame!.getAttribute('src')).toMatch(
+      new RegExp(`^https://www\\.youtube-nocookie\\.com/embed/${YT}\\?`),
+    );
+    expect(frame).toHaveAttribute(
+      'title',
+      'YouTube video: How agents use tools',
+    );
+    expect(frame).toHaveAttribute(
+      'referrerpolicy',
+      'strict-origin-when-cross-origin',
+    );
+    expect(frame!.getAttribute('sandbox')).toContain('allow-scripts');
+    expect(frame!.getAttribute('allow')).toContain('encrypted-media');
+    expect(frame).toHaveAttribute('allowfullscreen');
+    expect(player).toHaveTextContent(enUS.feed.media.youtubeTrouble);
+  });
+
+  it('plays a YouTube Short in portrait', async () => {
+    await renderAt('/?item=13');
+    const player = await screen.findByTestId('feed-youtube');
+    expect(
+      within(player).getByRole('button', { name: enUS.feed.media.play })
+        .parentElement,
+    ).toHaveClass('aspect-[9/16]');
+    expect(
+      within(player).getByRole('link', { name: enUS.feed.media.openYouTube }),
+    ).toHaveAttribute('href', `https://www.youtube.com/shorts/${YT}`);
+  });
+
+  it('keeps the plain link when no video id can be read', async () => {
+    await renderAt('/?item=14');
+    const content = await screen.findByRole('region', {
+      name: enUS.feed.detail.content,
+    });
+    expect(screen.queryByTestId('feed-youtube')).not.toBeInTheDocument();
+    expect(content.querySelector('iframe')).toBeNull();
+    expect(
+      screen
+        .getAllByRole('link')
+        .some(
+          (link) =>
+            link.getAttribute('href') === 'https://www.youtube.com/@channel',
+        ),
+    ).toBe(true);
   });
 
   it('offers to fetch the text of a title-only note', async () => {
