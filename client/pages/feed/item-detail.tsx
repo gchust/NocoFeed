@@ -51,6 +51,7 @@ import type {
   PartCoverage,
   StateChange,
 } from './types.js';
+import { youTubeVideoOf } from './youtube.js';
 
 export interface ItemDetailProps {
   readonly itemId: number;
@@ -325,6 +326,8 @@ export function ItemDetail({
     ['transcript', item.coverage.transcript],
     ['media', item.coverage.media],
   ];
+  // A YouTube video plays here; without a recognisable id the link to the original stays the way to watch it.
+  const youtube = youTubeVideoOf(item);
   // The post's own words: its body, else a summary that says more than the title.
   const text =
     item.body?.trim() ||
@@ -643,12 +646,12 @@ export function ItemDetail({
         aria-label={t('feed.detail.content')}
         className='flex flex-col gap-4'
       >
-        <MediaGallery media={item.media} />
+        <MediaGallery media={item.media} youtube={youtube} title={item.title} />
         {text ? (
           <ArticleText text={text} />
         ) : (
           <p className='text-sm text-muted-foreground'>
-            {item.media.length
+            {item.media.length || youtube
               ? t('feed.detail.mediaOnly')
               : t('feed.detail.titleOnly')}
           </p>

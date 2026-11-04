@@ -6,6 +6,12 @@ import { Button } from '#components/ui/button';
 import { cn } from 'cn';
 
 import type { MediaEntry } from './types.js';
+import {
+  type YouTubeVideo,
+  youTubeEmbedUrl,
+  youTubeThumbnail,
+  youTubeWatchUrl,
+} from './youtube.js';
 
 /*
  * The post itself: its pictures, video and text, shown the way the platform lays them out. Media links are the
@@ -175,20 +181,106 @@ function VideoPlayer({ entry }: { readonly entry: MediaEntry }): ReactElement {
   );
 }
 
-/** The post's pictures (one large, the rest as a strip to switch between) and its video. */
+/** What the YouTube player may do inside its frame: run, go full screen and open YouTube in a new tab. */
+const YOUTUBE_SANDBOX =
+  'allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox';
+const YOUTUBE_ALLOW =
+  'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+
+/**
+ * A YouTube video, played inside the feed. Until the person presses play only the thumbnail loads (from
+ * i.ytimg.com); the privacy-enhanced player (youtube-nocookie.com) is loaded on click. Shorts are portrait.
+ */
+export function YouTubePlayer({
+  video,
+  title,
+}: {
+  readonly video: YouTubeVideo;
+  readonly title: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  const [playing, setPlaying] = useState(false);
+  const frame = cn(
+    'relative overflow-hidden rounded-lg bg-muted',
+    video.short
+      ? 'mx-auto aspect-[9/16] w-full max-w-[18rem]'
+      : 'aspect-video w-full',
+  );
+  return (
+    <div className='flex flex-col gap-1.5' data-testid='feed-youtube'>
+      <div className={frame}>
+        {playing ? (
+          <iframe
+            src={youTubeEmbedUrl(video)}
+            title={t('feed.media.youtubeTitle', { title })}
+            allow={YOUTUBE_ALLOW}
+            allowFullScreen
+            // YouTube's player refuses to play without the embedding page's origin (error 153).
+            referrerPolicy='strict-origin-when-cross-origin'
+            // allow-scripts with allow-same-origin is unsafe only for a same-origin frame; this one is always
+            // youtube-nocookie.com, whose player needs its own origin's storage to play.
+            // eslint-disable-next-line @eslint-react/dom-no-unsafe-iframe-sandbox
+            sandbox={YOUTUBE_SANDBOX}
+            className='absolute inset-0 size-full border-0'
+          />
+        ) : (
+          <button
+            type='button'
+            onClick={() => setPlaying(true)}
+            className='absolute inset-0 block size-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50'
+            aria-label={t('feed.media.play')}
+          >
+            <RemoteImage
+              src={youTubeThumbnail(video.id)}
+              alt={t('feed.media.videoCover')}
+              className='size-full object-cover'
+            />
+            <span className='absolute inset-0 flex items-center justify-center'>
+              <span className='flex size-12 items-center justify-center rounded-full bg-background/80 text-foreground'>
+                <PlayIcon className='size-5 fill-current' aria-hidden='true' />
+              </span>
+            </span>
+          </button>
+        )}
+      </div>
+      <span className='flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground'>
+        {playing ? <span>{t('feed.media.youtubeTrouble')}</span> : null}
+        <a
+          href={youTubeWatchUrl(video)}
+          target='_blank'
+          rel='noreferrer noopener'
+          className='inline-flex items-center gap-1 hover:text-primary hover:underline'
+        >
+          {t('feed.media.openYouTube')}
+          <ExternalLinkIcon className='size-3' aria-hidden='true' />
+        </a>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The post's pictures (one large, the rest as a strip to switch between) and its video. A YouTube video replaces the
+ * media's own video entries, which would be the same video.
+ */
 export function MediaGallery({
   media,
+  youtube = null,
+  title = '',
 }: {
   readonly media: readonly MediaEntry[];
+  readonly youtube?: YouTubeVideo | null;
+  readonly title?: string;
 }): ReactElement | null {
   const { t } = useTranslation();
   const [current, setCurrent] = useState(0);
-  const videos = media.filter((entry) => entry.type === 'video');
+  const videos = youtube ? [] : media.filter((entry) => entry.type === 'video');
   const images = media.filter((entry) => entry.type === 'image');
-  if (!videos.length && !images.length) return null;
+  if (!youtube && !videos.length && !images.length) return null;
   const shown = images[Math.min(current, images.length - 1)];
   return (
     <section aria-label={t('feed.parts.media')} className='flex flex-col gap-2'>
+      {youtube ? <YouTubePlayer video={youtube} title={title} /> : null}
       {videos.map((entry) => (
         <VideoPlayer key={entry.url} entry={entry} />
       ))}

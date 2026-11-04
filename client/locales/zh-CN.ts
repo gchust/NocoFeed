@@ -211,6 +211,9 @@ const zhCN: AppResource = {
       play: '播放视频',
       openVideo: '打开视频文件',
       unavailable: '图片无法加载（链接可能已过期）',
+      openYouTube: '在 YouTube 打开',
+      youtubeTitle: 'YouTube 视频：{{title}}',
+      youtubeTrouble: '播放不了？该视频可能不允许嵌入播放。',
     },
     coverage: {
       available: '已读取',

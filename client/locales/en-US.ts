@@ -225,6 +225,9 @@ const enUS = {
       play: 'Play video',
       openVideo: 'Open the video file',
       unavailable: 'Image unavailable (the link may have expired)',
+      openYouTube: 'Open on YouTube',
+      youtubeTitle: 'YouTube video: {{title}}',
+      youtubeTrouble: 'Not playing? The video may not allow embedding.',
     },
     coverage: {
       available: 'Read',

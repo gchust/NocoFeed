@@ -90,6 +90,17 @@ the person's topics and experience, and the person keeps their own marks and not
 - **Pages show the original.** The card shows title, the opening of the text and the cover, with the analysis as one
   line; the detail shows the analysis as one collapsed line (`Collapsible`) above the media gallery and the text in its
   paragraphs (`content.tsx`); the analysis details, feedback and the material read open from that line.
+- **YouTube plays in place** (`youtube.ts`, `YouTubePlayer` in `content.tsx`). The video id comes from the item's
+  `url` (`watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `live/`, with `t=`/`start=` kept as the start) — on any
+  platform, so a linked video plays too — and, for YouTube items, from `externalId` (`yt:video:<id>` or the bare id).
+  Nothing is stored: the card's thumbnail (`i.ytimg.com/vi/<id>/hqdefault.jpg`, used only when the item has no
+  `cover`) and the player are derived in the page. The detail shows the thumbnail and a play button; only the click
+  loads the `youtube-nocookie.com/embed/<id>` iframe (sandboxed, `referrerPolicy='strict-origin-when-cross-origin'`,
+  which YouTube's player needs). Shorts are 9:16, the rest 16:9. Without a readable id the item keeps only its link.
+- **Content-Security-Policy.** The application sets none today (no header from the server or the dev server, no
+  `<meta>` in `index.html`). Whoever adds one must keep the post first working:
+  `frame-src https://www.youtube-nocookie.com`, `img-src https://i.ytimg.com` plus the platforms' https CDNs,
+  `media-src` for their video links; and must not send `Cross-Origin-Embedder-Policy: require-corp`, which blocks the player.
 
 ## Time window
 
@@ -179,7 +190,8 @@ and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` 
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
 and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, read state, the post first: excerpt,
-cover, gallery, video, paragraphs). Read state and the default order: `tests/server/feed-read-state.test.ts` and
+cover, gallery, video, paragraphs, the YouTube player and card thumbnail; `tests/client/feed-youtube.test.ts` reads
+video ids). Read state and the default order: `tests/server/feed-read-state.test.ts` and
 `tests/database/feed-read-state-migration.test.ts`. Text and media: `tests/server/feed-media-prefetch.test.ts`,
 `tests/database/feed-item-media-migration.test.ts` and the media case in `feed-collector-client.test.ts`. Runner agents:
 `tests/server/feed-runner-agent.test.ts` (hand-off, assembly, settling, fallbacks; an `ensureSystem` agent stands in
