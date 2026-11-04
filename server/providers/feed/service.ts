@@ -56,6 +56,10 @@ import type {
 export type TopicMode = 'both' | 'participate' | 'learn';
 export type FeedView =
   'all' | 'discuss' | 'learn' | 'saved' | 'later' | 'participated';
+/** How far back the feed list reaches, by when an item was published. */
+export type FeedPeriod = 'day' | 'week' | 'month';
+export type FeedSort = 'priority' | 'newest';
+const PERIOD_DAYS: Record<FeedPeriod, number> = { day: 1, week: 7, month: 30 };
 
 export interface Profile {
   interests: string;
@@ -74,6 +78,8 @@ export interface Profile {
   timeZone: string | null;
   /** The runner agent "Analyze again" is handed to; null keeps the model gateway and the rules. */
   readerAgentId: string | null;
+  /** Collection keeps items published within this many days; 0 keeps everything. */
+  maxAgeDays: number;
 }
 
 export type SourceHealth = 'ok' | 'failing' | 'quiet';
@@ -305,6 +311,46 @@ class KnownIds extends Set<string> {
   }
 }
 
+/**
+ * The time window of one collection run, or null when the person keeps everything (`maxAgeDays` 0).
+ *
+ * - `cutoff`  items published before it are not stored: older than the person's window
+ * - `since`   what the platform is asked for: the cutoff on a first run, afterwards from shortly before the last
+ *             successful run (never before the cutoff), so a search does not page through what was read already
+ */
+export function collectWindow(
+  maxAgeDays: number,
+  lastSuccessAt: string | null,
+  now: Date = new Date(),
+): { cutoff: Date; since: Date } | null {
+  if (!(maxAgeDays > 0)) return null;
+  const cutoff = new Date(now.getTime() - maxAgeDays * DAY_MS);
+  const last = lastSuccessAt ? Date.parse(lastSuccessAt) : Number.NaN;
+  const since = Number.isFinite(last)
+    ? new Date(Math.max(cutoff.getTime(), last - SINCE_OVERLAP_MS))
+    : cutoff;
+  return { cutoff, since };
+}
+
+/**
+ * Leaves out items published before `cutoff`; an item whose date is unknown stays. Lists come newest first, so
+ * reaching an item older than the window means nothing inside it was cut off: the result is not truncated.
+ */
+export function withinWindow(
+  result: CollectResult,
+  cutoff: Date,
+): CollectResult {
+  const items = result.items.filter((item) => {
+    const published = item.publishedAt
+      ? Date.parse(item.publishedAt)
+      : Number.NaN;
+    return !Number.isFinite(published) || published >= cutoff.getTime();
+  });
+  return items.length === result.items.length
+    ? result
+    : { ...result, items, truncated: false };
+}
+
 export interface CatalogEntry {
   platform: Platform;
   experimental: boolean;
@@ -411,6 +457,14 @@ const ANALYSIS_TOKENS = 4_000;
 const PREFILTER_TOKENS = 3_000;
 /** Model analyses per person per day until they choose otherwise. */
 const DEFAULT_DAILY_LIMIT = 1_000;
+/** A feed is about what is new: collection keeps what was published within this many days unless the person says. */
+export const DEFAULT_MAX_AGE_DAYS = 7;
+const DAY_MS = 24 * HOUR_MS;
+/**
+ * How far before the last successful run a search reaches again: platforms index late and round their date filters,
+ * so the window overlaps instead of starting at the instant of the last run. What was stored already is dropped by id.
+ */
+const SINCE_OVERLAP_MS = DAY_MS;
 const DEFAULT_SEARCH_FREQUENCY = 360;
 const DEFAULT_SEARCH_LIMIT = 20;
 /** Each term runs on every chosen platform, so the cap keeps one topic from flooding the Collector. */
@@ -522,6 +576,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       digestHour: Number(row?.digestHour ?? 8),
       timeZone: (row?.timeZone as string | null) ?? null,
       readerAgentId: (row?.readerAgentId as string | null) ?? null,
+      maxAgeDays: Number(row?.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS),
     };
   }
 
@@ -534,7 +589,11 @@ export function createFeedService(deps: FeedServiceDeps) {
       Partial<
         Pick<
           Profile,
-          'digestEnabled' | 'digestHour' | 'timeZone' | 'readerAgentId'
+          | 'digestEnabled'
+          | 'digestHour'
+          | 'timeZone'
+          | 'readerAgentId'
+          | 'maxAgeDays'
         >
       > & {
         locale?: Locale;
@@ -559,6 +618,9 @@ export function createFeedService(deps: FeedServiceDeps) {
       ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
       ...(input.readerAgentId !== undefined
         ? { readerAgentId: input.readerAgentId?.trim() || null }
+        : {}),
+      ...(input.maxAgeDays !== undefined
+        ? { maxAgeDays: input.maxAgeDays }
         : {}),
       ...(input.resetLearning ? { termWeights: null } : {}),
       updatedAt: new Date(),
@@ -1231,16 +1293,27 @@ export function createFeedService(deps: FeedServiceDeps) {
       const single = findOperation(source.platform, source.operation)?.operation
         .single;
       const firstRun = !source.lastSuccessAt;
+      // A tracked single item is read whatever its age; lists keep only what is new.
+      const window = single
+        ? null
+        : collectWindow(
+            (await getProfile(ownerId)).maxAgeDays,
+            source.lastSuccessAt,
+          );
 
-      const result = await adapters.collect({
+      const collected = await adapters.collect({
         platform: source.platform,
         operation: source.operation,
         target: source.target,
         limit: source.candidateLimit,
         cursor: json<Record<string, unknown> | null>(sourceRow.cursor, null),
         knownIds,
+        since: window?.since ?? null,
         signal: AbortSignal.timeout(MAX_RUN_MS),
       });
+      const result = window
+        ? withinWindow(collected, window.cutoff)
+        : collected;
       const succeeded = result.status === 'ok' || result.status === 'partial';
       const runCoverage: RunCoverage | null = succeeded
         ? single
@@ -1286,6 +1359,8 @@ export function createFeedService(deps: FeedServiceDeps) {
               coverage: item.coverage,
               contentVersion: 1,
               publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
+              // Where it sits in time: when published, else now (see the time-window migration).
+              timelineAt: item.publishedAt ? new Date(item.publishedAt) : now,
               fetchedAt: now,
               createdAt: now,
             },
@@ -2406,6 +2481,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       topicId?: number;
       q?: string;
       since?: Date;
+      period?: FeedPeriod;
     },
   ) {
     let builder = database
@@ -2445,6 +2521,13 @@ export function createFeedService(deps: FeedServiceDeps) {
         eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
       );
     if (query.since) builder = builder.where('i.createdAt', '>=', query.since);
+    // When it was published; when that is unknown, when it was collected.
+    if (query.period)
+      builder = builder.where(
+        'i.timelineAt',
+        '>=',
+        new Date(Date.now() - PERIOD_DAYS[query.period] * DAY_MS),
+      );
     if (query.platform)
       builder = builder.where('i.platform', '=', query.platform);
     if (query.topicId) builder = builder.where('a.topicId', '=', query.topicId);
@@ -2463,7 +2546,8 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   /**
    * One page of the feed: items with their current analysis and the person's state, filtered in SQL, sorted by
-   * value then recency, paged by offset behind an opaque token. Three queries regardless of the page size.
+   * value then recency (or by publication time alone), paged by offset behind an opaque token. Three queries
+   * regardless of the page size.
    */
   async function listItems(
     ownerId: string,
@@ -2472,6 +2556,8 @@ export function createFeedService(deps: FeedServiceDeps) {
       platform?: string;
       topicId?: number;
       q?: string;
+      period?: FeedPeriod;
+      sort?: FeedSort;
       pageSize: number;
       pageToken?: string;
       /** Only items collected after this instant. */
@@ -2484,10 +2570,18 @@ export function createFeedService(deps: FeedServiceDeps) {
           Number(Buffer.from(query.pageToken, 'base64url').toString()) || 0,
         )
       : 0;
-    const page = await feedQuery(ownerId, query)
-      .select(['i.id as id', 'a.priority as priority'])
-      .orderBy('a.priority', 'desc')
-      .orderBy('i.id', 'desc')
+    const ordered =
+      query.sort === 'newest'
+        ? feedQuery(ownerId, query)
+            // Publication time where known, else collection time; the id keeps equal times in a stable order.
+            .select(['i.id as id', 'i.timelineAt as timelineAt'])
+            .orderBy('i.timelineAt', 'desc')
+            .orderBy('i.id', 'desc')
+        : feedQuery(ownerId, query)
+            .select(['i.id as id', 'a.priority as priority'])
+            .orderBy('a.priority', 'desc')
+            .orderBy('i.id', 'desc');
+    const page = await ordered
       .limit(query.pageSize + 1)
       .offset(offset)
       .execute<Row>();
@@ -2566,7 +2660,12 @@ export function createFeedService(deps: FeedServiceDeps) {
    */
   async function summary(
     ownerId: string,
-    filters: { platform?: string; topicId?: number; q?: string } = {},
+    filters: {
+      platform?: string;
+      topicId?: number;
+      q?: string;
+      period?: FeedPeriod;
+    } = {},
   ): Promise<FeedSummary> {
     const count = async (view: FeedView) => {
       const [row] = await feedQuery(ownerId, { ...filters, view })

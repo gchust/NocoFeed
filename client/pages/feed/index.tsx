@@ -66,11 +66,15 @@ import { ShortcutHelp } from './shortcuts.js';
 import { type ShortcutAction, useFeedShortcuts } from './use-feed-shortcuts.js';
 import {
   type FeedListItem,
+  type FeedPeriod,
+  type FeedSort,
   type FeedSummary,
   type FeedView,
   type ItemState,
+  PERIODS,
   PLATFORMS,
   type Platform,
+  SORTS,
   type Topic,
   VIEWS,
 } from './types.js';
@@ -123,6 +127,13 @@ export default function FeedPage(): ReactElement {
     ? (params.get('platform') as Platform)
     : undefined;
   const topicId = Number(params.get('topic')) || undefined;
+  const period = (PERIODS as readonly string[]).includes(
+    params.get('period') ?? '',
+  )
+    ? (params.get('period') as FeedPeriod)
+    : undefined;
+  const sort: FeedSort =
+    params.get('sort') === 'newest' ? 'newest' : 'priority';
   const q = params.get('q') ?? '';
   const selectedId = Number(params.get('item')) || undefined;
 
@@ -139,7 +150,7 @@ export default function FeedPage(): ReactElement {
   const [reloadCount, setReloadCount] = useState(0);
   const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 
-  const filterKey = JSON.stringify([view, platform, topicId, q]);
+  const filterKey = JSON.stringify([view, platform, topicId, q, period, sort]);
   const requestKey = `${filterKey}:${reloadCount}`;
   const [list, setList] = useState<ListResult>();
   const [loadingMore, setLoadingMore] = useState(false);
@@ -159,6 +170,8 @@ export default function FeedPage(): ReactElement {
           platform,
           topicId,
           q: q || undefined,
+          period,
+          sort,
           pageSize: PAGE_SIZE,
         },
         signal: controller.signal,
@@ -173,7 +186,7 @@ export default function FeedPage(): ReactElement {
         },
       );
     return () => controller.abort();
-  }, [api, filterKey, reloadCount, view, platform, topicId, q]);
+  }, [api, filterKey, reloadCount, view, platform, topicId, q, period, sort]);
 
   // Counts alone reload after a keyboard action, so the list keeps its place.
   const [countsVersion, setCountsVersion] = useState(0);
@@ -185,7 +198,7 @@ export default function FeedPage(): ReactElement {
     api
       .request<{ data: FeedSummary }>({
         path: 'feedItems/summary',
-        query: { platform, topicId, q: q || undefined },
+        query: { platform, topicId, q: q || undefined, period },
         signal: controller.signal,
       })
       .then(
@@ -196,7 +209,7 @@ export default function FeedPage(): ReactElement {
         () => undefined,
       );
     return () => controller.abort();
-  }, [api, reloadCount, countsVersion, platform, topicId, q]);
+  }, [api, reloadCount, countsVersion, platform, topicId, q, period]);
   useEffect(() => {
     const controller = new AbortController();
     api
@@ -235,6 +248,8 @@ export default function FeedPage(): ReactElement {
           platform,
           topicId,
           q: q || undefined,
+          period,
+          sort,
           pageSize: PAGE_SIZE,
           pageToken: token,
         },
@@ -410,7 +425,9 @@ export default function FeedPage(): ReactElement {
   }, [selectedId]);
 
   const topicNames = new Map(topics.map((topic) => [topic.id, topic.name]));
-  const filtered = Boolean(platform || topicId || q || view !== 'all');
+  const filtered = Boolean(
+    platform || topicId || q || period || view !== 'all',
+  );
 
   const detail = selectedId ? (
     <ItemDetail
@@ -465,6 +482,8 @@ export default function FeedPage(): ReactElement {
           summary={summary}
           platform={platform}
           topicId={topicId}
+          period={period}
+          sort={sort}
           topics={topics}
           onChange={update}
         />
@@ -544,6 +563,7 @@ export default function FeedPage(): ReactElement {
                       view: undefined,
                       platform: undefined,
                       topic: undefined,
+                      period: undefined,
                       q: undefined,
                     })
                   }
@@ -642,6 +662,8 @@ function FeedRail({
   summary,
   platform,
   topicId,
+  period,
+  sort,
   topics,
   onChange,
 }: {
@@ -649,6 +671,8 @@ function FeedRail({
   readonly summary?: FeedSummary;
   readonly platform?: Platform;
   readonly topicId?: number;
+  readonly period?: FeedPeriod;
+  readonly sort: FeedSort;
   readonly topics: readonly Topic[];
   readonly onChange: (changes: Record<string, string | undefined>) => void;
 }): ReactElement {
@@ -664,6 +688,17 @@ function FeedRail({
     { value: ALL, label: t('feed.filters.allTopics') },
     ...topics.map((topic) => ({ value: String(topic.id), label: topic.name })),
   ];
+  const periodItems = [
+    { value: ALL, label: t('feed.filters.anyTime') },
+    ...PERIODS.map((value) => ({
+      value,
+      label: t(`feed.filters.periods.${value}`),
+    })),
+  ];
+  const sortItems = SORTS.map((value) => ({
+    value,
+    label: t(`feed.filters.sorts.${value}`),
+  }));
   return (
     <nav
       aria-label={t('feed.views.label')}
@@ -757,6 +792,56 @@ function FeedRail({
           <SelectContent>
             <SelectGroup>
               {topicItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          items={periodItems}
+          value={period ?? ALL}
+          onValueChange={(value) =>
+            onChange({
+              period: !value || value === ALL ? undefined : String(value),
+              item: undefined,
+            })
+          }
+        >
+          <SelectTrigger
+            className='w-full'
+            aria-label={t('feed.filters.period')}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {periodItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          items={sortItems}
+          value={sort}
+          onValueChange={(value) =>
+            onChange({
+              // The default order stays out of the address.
+              sort: value === 'newest' ? 'newest' : undefined,
+              item: undefined,
+            })
+          }
+        >
+          <SelectTrigger className='w-full' aria-label={t('feed.filters.sort')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {sortItems.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>

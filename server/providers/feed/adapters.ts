@@ -265,6 +265,7 @@ function createHttp(config: () => FeedConfig): Http {
       throw new AdapterError(
         'failed',
         `${new URL(url).host} answered ${response.status}`,
+        response.status,
       );
     }
     return response;
@@ -938,6 +939,9 @@ async function collectBilibiliVideo(
 
 // The Docker Collector: fixed, registered actions behind one HTTP contract (see docs/collector.md).
 
+/** How long a Collector that refused `since` is asked without it before trying again (it may have been upgraded). */
+const SINCE_RETRY_MS = 60 * 60_000;
+
 interface CollectorResponse {
   status?: CollectResult['status'];
   message?: string;
@@ -961,22 +965,43 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
     timeoutMs: config().collector.timeoutMs,
     service: true,
   });
+  // A Collector older than the time window refuses `since` as an unknown field (400). It is then asked without it
+  // for a while, and NocoFeed applies the window to what comes back.
+  let sinceRefusedUntil = 0;
 
   return {
     async collect(request: CollectRequest): Promise<CollectResult> {
-      const response = await http.post<CollectorResponse>(
-        endpoint('/v1/collect'),
-        {
-          platform: request.platform,
-          operation: request.operation,
-          target: request.target,
-          limit: request.limit,
-          cursor: request.cursor,
-        },
-        request.signal,
-        headers(),
-        options(),
-      );
+      const body = {
+        platform: request.platform,
+        operation: request.operation,
+        target: request.target,
+        limit: request.limit,
+        cursor: request.cursor,
+      };
+      const send = (payload: object) =>
+        http.post<CollectorResponse>(
+          endpoint('/v1/collect'),
+          payload,
+          request.signal,
+          headers(),
+          options(),
+        );
+      let response: CollectorResponse;
+      if (request.since && Date.now() >= sinceRefusedUntil) {
+        try {
+          response = await send({
+            ...body,
+            since: request.since.toISOString(),
+          });
+        } catch (error) {
+          if (!(error instanceof AdapterError && error.httpStatus === 400))
+            throw error;
+          sinceRefusedUntil = Date.now() + SINCE_RETRY_MS;
+          response = await send(body);
+        }
+      } else {
+        response = await send(body);
+      }
       const listed = (response.items ?? []).filter(
         (item) =>
           item &&

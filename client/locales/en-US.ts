@@ -91,6 +91,18 @@ const enUS = {
       allTopics: 'All topics',
       platform: 'Platform',
       topic: 'Topic',
+      period: 'Published',
+      anyTime: 'Any time',
+      periods: {
+        day: 'Past 24 hours',
+        week: 'Past week',
+        month: 'Past month',
+      },
+      sort: 'Sort',
+      sorts: {
+        priority: 'Most worth reading',
+        newest: 'Newest first',
+      },
     },
     platforms: {
       reddit: 'Reddit',
@@ -672,6 +684,12 @@ const enUS = {
       digestEnabled: 'Daily digest',
       digestHour: 'Send after',
       readerAgentId: 'Runner agent for “Analyse again”',
+      maxAgeDays: 'Collect items from',
+    },
+    maxAge: {
+      day: 'The past 24 hours',
+      days: 'The past {{count}} days',
+      unlimited: 'Any time',
     },
     agent: {
       none: 'None: use the AI model and the rules',
@@ -695,6 +713,8 @@ const enUS = {
       digestEnabled:
         'Once a day, your inbox gets the best three discussions and the best learning item of the last 24 hours. Days with nothing worth it send nothing.',
       digestHour: 'Your local time ({{zone}}).',
+      maxAgeDays:
+        'Subscriptions and topic searches keep only what was published in this window, and each run asks for what is new since the last one. Items already collected are never fetched or analysed again.',
       readerAgentId:
         'A runner agent opens the original and its discussion itself, including pages this server cannot fetch. Without one, or when it cannot finish, the model and the rules analyse as before.',
       readerAgentIdEmpty:

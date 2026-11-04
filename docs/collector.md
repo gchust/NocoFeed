@@ -25,9 +25,18 @@ Lists new candidates for one subscription.
   "operation": "keyword",
   "target": "独立开发",
   "limit": 20,
-  "cursor": null
+  "cursor": null,
+  "since": "2026-10-28T00:00:00.000Z"
 }
 ```
+
+`since` is optional: only items published at or after it are wanted. NocoFeed sends it for list operations (never for
+a single tracked item) when the person keeps a time window (`feedProfiles.maxAgeDays`, 7 days by default): the window's
+start on a subscription's first run, afterwards a day before its last successful run, never earlier than the window.
+Narrow the platform search with it where the platform can (a date range, a "past week" filter, `since:` operators), and
+drop items whose `publishedAt` is earlier; keep items whose date is unknown. A Collector that answers `400` to a request
+with `since` is asked again without it, and for the next hour not at all; NocoFeed filters every answer by `publishedAt`
+itself either way, so an older Collector keeps working.
 
 Answer:
 
@@ -75,7 +84,8 @@ Answer:
   `toolMissing`, `invalidTarget`, `notFound`, `upstreamError`, `networkError`, `outputLimit`, `unsupportedOperation`,
   `unsupportedPart`, `missingUrl`, `invalidResponse`; notes add `noTranscript`, `commentsNotLoaded` and `topLevel:<read>/<total>` (or
   `topLevel:<read>` when the total is unknown).
-- Return items newest first. Set `truncated` when the page was full, so more may lie behind it. NocoFeed drops ids it
+- Return items newest first (sort by publication time where the platform allows). Set `truncated` when the page was
+  full, so more may lie behind it; not when the list reached past `since`, which means the window was covered. NocoFeed drops ids it
   already stores and marks a run `partial` when the page was full (`truncated`, or as many items as `limit`) and no
   stored item was reached, so it never claims completeness it does not have.
 - Answer HTTP `401`/`403` only for a wrong token; NocoFeed reports that as `unconfigured`/`collectorUnauthorized`, not as

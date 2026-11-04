@@ -291,6 +291,58 @@ describe('feed page', () => {
     );
   });
 
+  it('narrows the list to a publication period and sorts it newest first', async () => {
+    const user = userEvent.setup();
+    await renderAt('/');
+    const rail = await screen.findByRole('navigation', {
+      name: enUS.feed.views.label,
+    });
+
+    await user.click(
+      within(rail).getByRole('combobox', { name: enUS.feed.filters.period }),
+    );
+    await user.click(
+      await screen.findByRole('option', {
+        name: enUS.feed.filters.periods.week,
+      }),
+    );
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ period: 'week', sort: 'priority' }),
+        }),
+      ),
+    );
+    // The counts follow the period as the list does.
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: 'feedItems/summary',
+        query: expect.objectContaining({ period: 'week' }),
+      }),
+    );
+
+    await user.click(
+      within(rail).getByRole('combobox', { name: enUS.feed.filters.sort }),
+    );
+    await user.click(
+      await screen.findByRole('option', {
+        name: enUS.feed.filters.sorts.newest,
+      }),
+    );
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ period: 'week', sort: 'newest' }),
+        }),
+      ),
+    );
+  });
+
   it('opens the detail from the URL and saves a mark', async () => {
     await renderAt('/?item=7');
 

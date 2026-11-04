@@ -104,6 +104,11 @@ export interface CollectRequest {
   cursor: Record<string, unknown> | null;
   /** External ids already stored for this owner and platform, newest first; used to stop early. */
   knownIds: ReadonlySet<string>;
+  /**
+   * Only items published from this instant on are wanted; null for no window. The Collector narrows its searches with
+   * it where the platform can; native lists are newest first and NocoFeed filters every answer by `publishedAt`.
+   */
+  since?: Date | null;
   signal: AbortSignal;
 }
 
@@ -130,6 +135,8 @@ export class AdapterError extends Error {
   constructor(
     readonly status: CollectStatus,
     message: string,
+    /** The HTTP status that caused it, when an upstream answered with an error. */
+    readonly httpStatus?: number,
   ) {
     super(message);
     this.name = 'AdapterError';
