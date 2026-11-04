@@ -56,35 +56,15 @@ export const SaveProfileBody = z.strictObject({
     .meta({ description: 'Forget the word weights learned from feedback' }),
 });
 
-// Topics
-
-export const FeedTopicSchema = z
-  .object({
-    id: z.number().int(),
-    name: z.string(),
-    goal: z.string(),
-    avoid: z.string().nullable(),
-    mode: MODE,
-    sourceIds: z.array(z.number().int()),
-    createdAt: z.string(),
-  })
-  .meta({ ref: 'FeedTopic' });
-
-export const CreateTopicBody = z.strictObject({
-  name: z.string().trim().min(1).max(40),
-  goal: z.string().trim().min(1).max(2_000),
-  avoid: z.string().max(1_000).nullable().optional(),
-  mode: MODE,
-  sourceIds: z.array(z.number().int().positive()).max(100).default([]),
-});
-
-export const UpdateTopicBody = CreateTopicBody.partial();
-
 // Sources
 
 export const FeedSourceSchema = z
   .object({
     id: z.number().int(),
+    topicId: z.number().int().nullable().meta({
+      description:
+        'The topic whose search this is; null for a subscription made directly',
+    }),
     platform: PLATFORM,
     operation: z.string(),
     name: z.string(),
@@ -129,6 +109,72 @@ export const UpdateSourceBody = z.strictObject({
   candidateLimit: CANDIDATES.optional(),
   active: z.boolean().optional(),
 });
+
+// Topics
+
+/** Terms a topic searches for itself; each runs on every chosen platform. */
+const SEARCH_TERMS = z.array(z.string().trim().min(1).max(200)).max(10);
+const SEARCH_PLATFORMS = z.array(PLATFORM).max(10);
+
+export const FeedTopicSchema = z
+  .object({
+    id: z.number().int(),
+    name: z.string(),
+    goal: z.string(),
+    avoid: z.string().nullable(),
+    mode: MODE,
+    sourceIds: z.array(z.number().int()).meta({
+      description:
+        'Subscriptions the topic is limited to; empty means it judges what every subscription brings',
+    }),
+    searchTerms: z.array(z.string()),
+    searchPlatforms: z.array(PLATFORM).meta({
+      description:
+        'Platforms to search on; empty means every platform that can search',
+    }),
+    searchFrequency: z.number().int(),
+    searchLimit: z.number().int(),
+    searches: z.array(FeedSourceSchema).meta({
+      description:
+        'The searches running for this topic, one per term and platform',
+    }),
+    createdAt: z.string(),
+  })
+  .meta({ ref: 'FeedTopic' });
+
+const TOPIC_FIELDS = {
+  name: z.string().trim().min(1).max(40),
+  goal: z.string().trim().min(1).max(2_000),
+  avoid: z.string().max(1_000).nullable(),
+  mode: MODE,
+  sourceIds: z.array(z.number().int().positive()).max(100),
+  searchTerms: SEARCH_TERMS,
+  searchPlatforms: SEARCH_PLATFORMS,
+  searchFrequency: FREQUENCY,
+  searchLimit: CANDIDATES,
+};
+
+export const CreateTopicBody = z.strictObject({
+  ...TOPIC_FIELDS,
+  avoid: TOPIC_FIELDS.avoid.optional(),
+  sourceIds: TOPIC_FIELDS.sourceIds.default([]),
+  searchTerms: SEARCH_TERMS.default([]),
+  searchPlatforms: SEARCH_PLATFORMS.default([]),
+  searchFrequency: FREQUENCY.default(360),
+  searchLimit: CANDIDATES.default(20),
+});
+
+/** Without defaults: a field left out of an update keeps its value. */
+export const UpdateTopicBody = z.strictObject(TOPIC_FIELDS).partial();
+
+export const TopicRunSchema = z
+  .object({
+    started: z.number().int().meta({
+      description:
+        'Searches started now; they run one after another in the background',
+    }),
+  })
+  .meta({ ref: 'FeedTopicRun' });
 
 export const FeedCatalogSchema = z
   .object({

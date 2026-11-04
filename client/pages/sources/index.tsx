@@ -57,7 +57,7 @@ import {
   PlatformBadge,
   RunStatusBadge,
 } from '../feed/parts.js';
-import type { Catalog, Run, Source, Topic } from '../feed/types.js';
+import type { Catalog, Run, Source } from '../feed/types.js';
 import type { SourcesOutletContext } from './types.js';
 
 export default function SourcesPage(): ReactElement {
@@ -71,7 +71,6 @@ export default function SourcesPage(): ReactElement {
     readonly key: number;
     readonly sources?: readonly Source[];
     readonly catalog?: Catalog;
-    readonly topics?: readonly Topic[];
     readonly error?: unknown;
   }>();
   const [busy, setBusy] = useState<number>();
@@ -84,15 +83,13 @@ export default function SourcesPage(): ReactElement {
     void Promise.all([
       api.request<{ data: Source[] }>({ path: 'feedSources', signal }),
       api.request<{ data: Catalog }>({ path: 'feedCatalog', signal }),
-      api.request<{ data: Topic[] }>({ path: 'feedTopics', signal }),
     ]).then(
-      ([sources, catalog, topics]) => {
+      ([sources, catalog]) => {
         if (!signal.aborted)
           setResult({
             key: reloadCount,
             sources: sources.data,
             catalog: catalog.data,
-            topics: topics.data,
           });
       },
       (error: unknown) => {
@@ -110,7 +107,6 @@ export default function SourcesPage(): ReactElement {
     reload,
     sources,
     catalog,
-    topics: result?.topics ?? [],
   };
 
   const failed = (cause: unknown): void => {

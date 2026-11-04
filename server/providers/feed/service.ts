@@ -28,7 +28,12 @@ import {
   type QualityDetail,
 } from './analyzer.js';
 import type { GoldCase } from './evaluation.js';
-import { CATALOG, findOperation, type Platform } from './catalog.js';
+import {
+  CATALOG,
+  findOperation,
+  SEARCH_PLATFORMS,
+  type Platform,
+} from './catalog.js';
 import { truncate } from './text.js';
 import { createHash } from 'node:crypto';
 import type {
@@ -68,12 +73,33 @@ export interface Topic {
   goal: string;
   avoid: string | null;
   mode: TopicMode;
+  /** The subscriptions this topic is limited to; empty means it judges what every subscription brings. */
   sourceIds: number[];
+  /** Terms the topic searches for itself; empty when it only judges what subscriptions bring. */
+  searchTerms: string[];
+  /** Platforms to search on; empty means every platform that can search. */
+  searchPlatforms: Platform[];
+  /** Minutes between runs of each search. */
+  searchFrequency: number;
+  /** Candidates each search brings back. */
+  searchLimit: number;
+  /** The searches running for this topic: one per term and platform. */
+  searches: Source[];
   createdAt: string;
 }
 
+export type TopicInput = Pick<Topic, 'name' | 'goal' | 'avoid' | 'mode'> & {
+  sourceIds?: number[];
+  searchTerms?: string[];
+  searchPlatforms?: Platform[];
+  searchFrequency?: number;
+  searchLimit?: number;
+};
+
 export interface Source {
   id: number;
+  /** The topic whose search this is; null for a subscription made directly. */
+  topicId: number | null;
   platform: Platform;
   operation: string;
   name: string;
@@ -283,6 +309,7 @@ export class FeedError extends Error {
 }
 
 type Row = Record<string, unknown>;
+type Connection = Parameters<Parameters<DatabaseManager['transaction']>[0]>[0];
 
 /** A text column's value; anything that is not a scalar reads as empty. */
 const text = (value: unknown): string =>
@@ -339,6 +366,10 @@ const ANALYSIS_TOKENS = 4_000;
 const PREFILTER_TOKENS = 3_000;
 /** Model analyses per person per day until they choose otherwise. */
 const DEFAULT_DAILY_LIMIT = 1_000;
+const DEFAULT_SEARCH_FREQUENCY = 360;
+const DEFAULT_SEARCH_LIMIT = 20;
+/** Each term runs on every chosen platform, so the cap keeps one topic from flooding the Collector. */
+const MAX_SEARCH_TERMS = 10;
 /** Items asked about in one prefilter call. */
 const PREFILTER_BATCH = 20;
 const RESCORE_LIMIT = 200;
@@ -507,22 +538,58 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   // Topics
 
-  const toTopic = (row: Row): Topic => ({
+  const toTopic = (row: Row, searches: Source[] = []): Topic => ({
     id: Number(row.id),
     name: String(row.name),
     goal: String(row.goal),
     avoid: (row.avoid as string | null) ?? null,
     mode: (row.mode as TopicMode) ?? 'both',
     sourceIds: json<number[]>(row.sourceIds, []).map(Number),
+    searchTerms: json<unknown[]>(row.searchTerms, []).map(String),
+    searchPlatforms: json<unknown[]>(row.searchPlatforms, []).filter(
+      (value): value is Platform =>
+        SEARCH_PLATFORMS.includes(value as Platform),
+    ),
+    searchFrequency: Number(row.searchFrequency ?? DEFAULT_SEARCH_FREQUENCY),
+    searchLimit: Number(row.searchLimit ?? DEFAULT_SEARCH_LIMIT),
+    searches,
     createdAt: iso(row.createdAt) ?? '',
   });
 
-  async function listTopics(ownerId: string): Promise<Topic[]> {
-    const rows = (await repo('feedTopics').findMany({
+  async function topicRows(ownerId: string): Promise<Row[]> {
+    return await repo('feedTopics').findMany({
       filter: { ownerId },
       sort: (s) => s.field('id').asc(),
-    })) as Row[];
-    return rows.map(toTopic);
+    });
+  }
+
+  /** Every topic with the searches it runs, in two queries. */
+  async function listTopics(ownerId: string): Promise<Topic[]> {
+    const [rows, searchRows] = await Promise.all([
+      topicRows(ownerId),
+      database
+        .query()
+        .selectFrom('feedSources')
+        .selectAll()
+        .where('ownerId', '=', ownerId)
+        .where('topicId', 'is not', null)
+        .orderBy('id', 'asc')
+        .execute<Row>(),
+    ]);
+    const byTopic = new Map<number, Source[]>();
+    for (const row of searchRows) {
+      const search = toSource(row);
+      const list = byTopic.get(Number(row.topicId)) ?? [];
+      list.push(search);
+      byTopic.set(Number(row.topicId), list);
+    }
+    return rows.map((row) => toTopic(row, byTopic.get(Number(row.id)) ?? []));
+  }
+
+  async function getTopic(ownerId: string, id: number): Promise<Topic> {
+    const topic = (await listTopics(ownerId)).find((entry) => entry.id === id);
+    if (!topic) throw new FeedError('notFound', `feedTopics ${id}`);
+    return topic;
   }
 
   async function ownedSourceIds(
@@ -535,38 +602,149 @@ export function createFeedService(deps: FeedServiceDeps) {
       .selectFrom('feedSources')
       .select(['id'])
       .where('ownerId', '=', ownerId)
+      .where('topicId', 'is', null)
       .where('id', 'in', ids)
       .execute();
     const owned = new Set(rows.map((row) => Number(row.id)));
     return ids.filter((id) => owned.has(id));
   }
 
+  /**
+   * The terms as they will be searched: trimmed, without repeats, each one a target every chosen platform accepts. A
+   * term one platform refuses fails the whole save, so the topic never silently searches fewer places than it shows.
+   */
+  function searchPlan(
+    terms: string[],
+    platforms: Platform[],
+  ): { terms: string[]; platforms: Platform[] } {
+    const cleaned = [
+      ...new Set(terms.map((term) => term.trim()).filter(Boolean)),
+    ];
+    if (cleaned.length > MAX_SEARCH_TERMS)
+      throw new FeedError('invalid', 'tooManySearchTerms');
+    if (platforms.some((platform) => !SEARCH_PLATFORMS.includes(platform)))
+      throw new FeedError('invalid', 'notASearchPlatform');
+    const chosen = SEARCH_PLATFORMS.filter((platform) =>
+      platforms.length ? platforms.includes(platform) : true,
+    );
+    for (const term of cleaned)
+      for (const platform of cleaned.length ? chosen : []) {
+        try {
+          validateSource(platform, 'keyword', term);
+        } catch {
+          throw new FeedError('invalid', 'searchTermLength');
+        }
+      }
+    return { terms: cleaned, platforms: chosen };
+  }
+
+  /**
+   * Makes the topic's search rows match its terms × platforms: missing pairs start at once, settings follow the topic,
+   * and pairs no longer wanted are removed. Collected items stay, like a deleted subscription's.
+   */
+  async function syncSearches(
+    connection: Connection,
+    ownerId: string,
+    topicRow: Row,
+  ): Promise<void> {
+    const topic = toTopic(topicRow);
+    const plan = searchPlan(topic.searchTerms, topic.searchPlatforms);
+    const key = (platform: string, term: string) => `${platform}\u0000${term}`;
+    const wanted = new Map<string, { platform: Platform; term: string }>();
+    for (const term of plan.terms)
+      for (const platform of plan.platforms)
+        wanted.set(key(platform, term), { platform, term });
+    const existing = (await connection.repository('feedSources').findMany({
+      filter: { ownerId, topicId: topic.id },
+    })) as Row[];
+    const now = new Date();
+    const kept = new Set<string>();
+    for (const row of existing) {
+      const id = key(text(row.platform), text(row.target));
+      const pair = wanted.get(id);
+      if (!pair || kept.has(id)) {
+        await connection
+          .repository('feedSources')
+          .deleteOne({ filter: { ownerId, id: Number(row.id) } } as never);
+        continue;
+      }
+      kept.add(id);
+      const values: Row = {};
+      const name = truncate(`${topic.name} · ${pair.term}`, 120);
+      if (row.name !== name) values.name = name;
+      if (Number(row.frequency) !== topic.searchFrequency)
+        values.frequency = topic.searchFrequency;
+      if (Number(row.candidateLimit) !== topic.searchLimit)
+        values.candidateLimit = topic.searchLimit;
+      if (Object.keys(values).length)
+        await connection.repository('feedSources').updateOne({
+          filter: { ownerId, id: Number(row.id) },
+          values: { ...values, updatedAt: now },
+        } as never);
+    }
+    for (const [id, pair] of wanted) {
+      if (kept.has(id)) continue;
+      await connection.repository('feedSources').createOne({
+        values: {
+          ownerId,
+          topicId: topic.id,
+          platform: pair.platform,
+          operation: 'keyword',
+          name: truncate(`${topic.name} · ${pair.term}`, 120),
+          target: pair.term,
+          frequency: topic.searchFrequency,
+          candidateLimit: topic.searchLimit,
+          active: true,
+          status: 'pending',
+          nextRunAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      } as never);
+    }
+  }
+
   async function createTopic(
     ownerId: string,
-    input: Omit<Topic, 'id' | 'createdAt'>,
+    input: TopicInput,
   ): Promise<Topic> {
+    const plan = searchPlan(
+      input.searchTerms ?? [],
+      input.searchPlatforms ?? [],
+    );
     const now = new Date();
-    const result = await repo('feedTopics').createOne({
-      values: {
-        ownerId,
-        name: input.name.trim(),
-        goal: input.goal.trim(),
-        avoid: input.avoid?.trim() || null,
-        mode: input.mode,
-        sourceIds: await ownedSourceIds(ownerId, input.sourceIds),
-        createdAt: now,
-        updatedAt: now,
-      },
-    } as never);
-    return toTopic((result as { record: Row }).record);
+    // Read before the transaction: on SQLite it holds the only connection.
+    const sourceIds = await ownedSourceIds(ownerId, input.sourceIds ?? []);
+    const id = await database.transaction(async (connection) => {
+      const result = await connection.repository('feedTopics').createOne({
+        values: {
+          ownerId,
+          name: input.name.trim(),
+          goal: input.goal.trim(),
+          avoid: input.avoid?.trim() || null,
+          mode: input.mode,
+          sourceIds,
+          searchTerms: plan.terms,
+          searchPlatforms: input.searchPlatforms?.length ? plan.platforms : [],
+          searchFrequency: input.searchFrequency ?? DEFAULT_SEARCH_FREQUENCY,
+          searchLimit: input.searchLimit ?? DEFAULT_SEARCH_LIMIT,
+          createdAt: now,
+          updatedAt: now,
+        },
+      } as never);
+      const record = (result as { record: Row }).record;
+      await syncSearches(connection, ownerId, record);
+      return Number(record.id);
+    });
+    return getTopic(ownerId, id);
   }
 
   async function updateTopic(
     ownerId: string,
     id: number,
-    input: Partial<Omit<Topic, 'id' | 'createdAt'>>,
+    input: Partial<TopicInput>,
   ): Promise<Topic> {
-    await requireRow('feedTopics', ownerId, id);
+    const current = toTopic(await requireRow('feedTopics', ownerId, id));
     const values: Row = { updatedAt: new Date() };
     if (input.name !== undefined) values.name = input.name.trim();
     if (input.goal !== undefined) values.goal = input.goal.trim();
@@ -574,16 +752,84 @@ export function createFeedService(deps: FeedServiceDeps) {
     if (input.mode !== undefined) values.mode = input.mode;
     if (input.sourceIds !== undefined)
       values.sourceIds = await ownedSourceIds(ownerId, input.sourceIds);
-    const result = await repo('feedTopics').updateOne({
-      filter: { ownerId, id },
-      values,
-    } as never);
-    return toTopic((result as { record: Row }).record);
+    const plan = searchPlan(
+      input.searchTerms ?? current.searchTerms,
+      input.searchPlatforms ?? current.searchPlatforms,
+    );
+    if (input.searchTerms !== undefined) values.searchTerms = plan.terms;
+    if (input.searchPlatforms !== undefined)
+      values.searchPlatforms = input.searchPlatforms.length
+        ? plan.platforms
+        : [];
+    if (input.searchFrequency !== undefined)
+      values.searchFrequency = input.searchFrequency;
+    if (input.searchLimit !== undefined) values.searchLimit = input.searchLimit;
+    await database.transaction(async (connection) => {
+      const result = await connection.repository('feedTopics').updateOne({
+        filter: { ownerId, id },
+        values,
+      } as never);
+      await syncSearches(
+        connection,
+        ownerId,
+        (result as { record: Row }).record,
+      );
+    });
+    return getTopic(ownerId, id);
   }
 
+  /** Deletes the topic and its searches; what they collected stays in the feed. */
   async function deleteTopic(ownerId: string, id: number): Promise<void> {
     await requireRow('feedTopics', ownerId, id);
-    await repo('feedTopics').deleteOne({ filter: { ownerId, id } } as never);
+    await database.transaction(async (connection) => {
+      await connection.query
+        .deleteFrom('feedSources')
+        .where('ownerId', '=', ownerId)
+        .where('topicId', '=', id)
+        .execute();
+      await connection
+        .repository('feedTopics')
+        .deleteOne({ filter: { ownerId, id } } as never);
+    });
+  }
+
+  /**
+   * Starts every active search of the topic now, one after another, without waiting for them: a run can take minutes and
+   * the request must not. A search already running is left to finish. `wait` is for tests.
+   */
+  async function runTopicSearches(
+    ownerId: string,
+    topicId: number,
+    { wait = false }: { wait?: boolean } = {},
+  ): Promise<{ started: number }> {
+    await requireRow('feedTopics', ownerId, topicId);
+    const rows = await database
+      .query()
+      .selectFrom('feedSources')
+      .select(['id'])
+      .where('ownerId', '=', ownerId)
+      .where('topicId', '=', topicId)
+      .where('active', '=', true)
+      .orderBy('id', 'asc')
+      .execute();
+    const ids = rows
+      .map((row) => Number(row.id))
+      .filter((id) => !running.has(id));
+    const work = (async () => {
+      for (const id of ids) {
+        try {
+          await runSource(ownerId, id, 'manual');
+        } catch (error) {
+          if (!(error instanceof FeedError && error.code === 'busy'))
+            deps.log('warn', 'topic search failed', {
+              sourceId: id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+        }
+      }
+    })();
+    if (wait) await work;
+    return { started: ids.length };
   }
 
   async function requireRow(
@@ -602,6 +848,7 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   const toSource = (row: Row): Source => ({
     id: Number(row.id),
+    topicId: row.topicId == null ? null : Number(row.topicId),
     platform: row.platform as Platform,
     operation: String(row.operation),
     name: String(row.name),
@@ -627,12 +874,26 @@ export function createFeedService(deps: FeedServiceDeps) {
     }),
   });
 
+  /** The subscriptions the person made; a topic's searches are listed with the topic. */
   async function listSources(ownerId: string): Promise<Source[]> {
+    return (await allSources(ownerId)).filter(
+      (source) => source.topicId == null,
+    );
+  }
+
+  async function allSources(ownerId: string): Promise<Source[]> {
     const rows = (await repo('feedSources').findMany({
       filter: { ownerId },
       sort: (s) => s.field('id').asc(),
     })) as Row[];
     return rows.map(toSource);
+  }
+
+  /** A topic's search is changed through its topic, so the two never disagree. */
+  async function requireDirectSource(ownerId: string, id: number) {
+    const row = await requireRow('feedSources', ownerId, id);
+    if (row.topicId != null) throw new FeedError('invalid', 'managedByTopic');
+    return row;
   }
 
   function validateSource(
@@ -701,8 +962,9 @@ export function createFeedService(deps: FeedServiceDeps) {
         const topic = (await connection.repository('feedTopics').findOne({
           filter: { ownerId, id: topicId },
         })) as Row | null;
-        if (!topic) continue;
-        const ids = json<number[]>(topic.sourceIds, []);
+        // A topic without a list already judges every subscription; adding one would limit it to this one.
+        const ids = json<number[]>(topic?.sourceIds, []);
+        if (!topic || !ids.length) continue;
         await connection.repository('feedTopics').updateOne({
           filter: { ownerId, id: topicId },
           values: {
@@ -726,7 +988,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       >
     >,
   ): Promise<Source> {
-    const current = toSource(await requireRow('feedSources', ownerId, id));
+    const current = toSource(await requireDirectSource(ownerId, id));
     const values: Row = { updatedAt: new Date() };
     if (input.name !== undefined) values.name = input.name.trim();
     if (input.target !== undefined) {
@@ -752,7 +1014,7 @@ export function createFeedService(deps: FeedServiceDeps) {
   }
 
   async function deleteSource(ownerId: string, id: number): Promise<void> {
-    await requireRow('feedSources', ownerId, id);
+    await requireDirectSource(ownerId, id);
     await database.transaction(async (connection) => {
       await connection
         .repository('feedSources')
@@ -849,7 +1111,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         ownerId,
         type: 'sourceHealth',
         referenceId: String(sourceId),
-        path: '/sources',
+        path: source.topicId == null ? '/sources' : '/topics',
         title:
           source.health === 'failing'
             ? zh
@@ -1120,7 +1382,7 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   async function sourceMap(ownerId: string): Promise<Map<number, Source>> {
     return new Map(
-      (await listSources(ownerId)).map((source) => [source.id, source]),
+      (await allSources(ownerId)).map((source) => [source.id, source]),
     );
   }
 
@@ -1336,12 +1598,23 @@ export function createFeedService(deps: FeedServiceDeps) {
     ownerId: string,
     sourceId: number | null,
   ): Promise<AnalysisTopic[]> {
-    const topics = await listTopics(ownerId);
-    const linked =
+    const [rows, source] = await Promise.all([
+      topicRows(ownerId),
       sourceId == null
-        ? []
-        : topics.filter((topic) => topic.sourceIds.includes(sourceId));
-    return (linked.length ? linked : topics).map((topic) => ({
+        ? null
+        : (repo('feedSources').findOne({
+            filter: { ownerId, id: sourceId },
+          }) as Promise<Row | null>),
+    ]);
+    const topics = rows.map((row) => toTopic(row));
+    // Without a known subscription every topic applies. Otherwise: the topics that judge every subscription, those
+    // limited to this one, and the topic whose search brought the item.
+    const applies = (topic: Topic) =>
+      sourceId == null ||
+      !topic.sourceIds.length ||
+      topic.sourceIds.includes(sourceId) ||
+      (source?.topicId != null && Number(source.topicId) === topic.id);
+    return topics.filter(applies).map((topic) => ({
       id: topic.id,
       name: topic.name,
       goal: topic.goal,
@@ -2355,6 +2628,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     createTopic,
     updateTopic,
     deleteTopic,
+    runTopicSearches,
     listSources,
     createSource,
     updateSource,

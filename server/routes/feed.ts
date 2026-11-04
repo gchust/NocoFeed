@@ -32,6 +32,7 @@ import {
   FeedStateChangeSchema,
   FeedSummarySchema,
   FeedTopicSchema,
+  TopicRunSchema,
   IdParams,
   ListItemsQuery,
   ListRunsQuery,
@@ -226,6 +227,27 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           feed().deleteTopic(ownerOf(context), context.req.valid('param').id),
         );
         return context.body(null, 204);
+      },
+    );
+    topics.post(
+      '/:id/run',
+      describeRoute({
+        tags: ['Feed'],
+        summary: "Run a topic's searches now",
+        description:
+          'Starts every active search of the topic in the background and answers at once; runs appear in the run history.',
+        operationId: 'runFeedTopicSearches',
+        responses: { '202': dataResponse(TopicRunSchema), ...errors },
+      }),
+      apiValidator('param', IdParams),
+      async (context) => {
+        const data = await guard(() =>
+          feed().runTopicSearches(
+            ownerOf(context),
+            context.req.valid('param').id,
+          ),
+        );
+        return context.json({ data }, 202);
       },
     );
     router.route('/feedTopics', topics);

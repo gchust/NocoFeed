@@ -199,3 +199,8 @@ export function findOperation(
   const op = spec?.operations.find((entry) => entry.operation === operation);
   return spec && op ? { platform: spec, operation: op } : undefined;
 }
+
+/** Platforms whose `keyword` operation can run a topic's search terms. */
+export const SEARCH_PLATFORMS: readonly Platform[] = CATALOG.filter((spec) =>
+  spec.operations.some((op) => op.operation === 'keyword'),
+).map((spec) => spec.platform);

@@ -54,11 +54,21 @@ export interface Topic {
   readonly avoid: string | null;
   readonly mode: TopicMode;
   readonly sourceIds: readonly number[];
+  /** Search terms; empty when the topic only judges what other sources bring in. */
+  readonly searchTerms: readonly string[];
+  /** Platforms to search on; empty means every platform that can search. */
+  readonly searchPlatforms: readonly Platform[];
+  readonly searchFrequency: number;
+  readonly searchLimit: number;
+  /** The running searches, one per term and platform. */
+  readonly searches: readonly Source[];
   readonly createdAt: string;
 }
 
 export interface Source {
   readonly id: number;
+  /** The topic that runs this search; null for a subscription made directly. */
+  readonly topicId: number | null;
   readonly platform: Platform;
   readonly operation: string;
   readonly name: string;

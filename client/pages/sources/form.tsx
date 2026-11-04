@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
-import { useOutletContext, useParams } from 'react-router';
+import { Link, useOutletContext, useParams } from 'react-router';
 import { z } from 'zod';
 
 import { FeedbackForm } from '#components/feedback-form';
@@ -17,7 +17,6 @@ import { RouteDialog } from '#components/route-dialog';
 import { SessionExpiredAlert } from '#components/session-expired-alert';
 import { StatusBadge } from '#components/status-badge';
 import { Button } from '#components/ui/button';
-import { Checkbox } from '#components/ui/checkbox';
 import {
   Field,
   FieldContent,
@@ -102,7 +101,7 @@ function Body({
   const api = useApiClient();
   const toaster = useToaster();
   const { close } = useRouteOverlay();
-  const { reload, topics } = useOutletContext<SourcesOutletContext>();
+  const { reload } = useOutletContext<SourcesOutletContext>();
   const entryRef = useRef(false);
 
   const schema = useMemo(
@@ -125,7 +124,6 @@ function Body({
           .int(t('sources.validation.candidates'))
           .min(1, t('sources.validation.candidates'))
           .max(100, t('sources.validation.candidates')),
-        topicIds: z.array(z.number()),
       }),
     [t],
   );
@@ -140,7 +138,6 @@ function Body({
       target: source?.target ?? '',
       frequency: source?.frequency ?? 60,
       candidateLimit: source?.candidateLimit ?? 20,
-      topicIds: [] as number[],
     },
   });
 
@@ -198,7 +195,6 @@ function Body({
                 target,
                 frequency: values.frequency,
                 candidateLimit: values.candidateLimit,
-                topicIds: values.topicIds,
               },
             },
       );
@@ -406,6 +402,14 @@ function Body({
                     },
                   )}
                 />
+                {!source && operation === 'keyword' ? (
+                  <FieldDescription>
+                    {t('sources.hints.keywordInTopics')}{' '}
+                    <Link to='/topics' className='text-primary hover:underline'>
+                      {t('sources.hints.keywordInTopicsLink')}
+                    </Link>
+                  </FieldDescription>
+                ) : null}
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -495,47 +499,6 @@ function Body({
             )}
           />
         </div>
-        {!source && topics.length > 0 ? (
-          <Controller
-            control={form.control}
-            name='topicIds'
-            render={({ field }) => (
-              <FieldSet>
-                <FieldLegend variant='label'>
-                  {t('sources.fields.topics')}
-                </FieldLegend>
-                <FieldDescription>{t('sources.hints.topics')}</FieldDescription>
-                <div className='flex flex-wrap gap-x-4 gap-y-2'>
-                  {topics.map((topic) => (
-                    <Field
-                      key={topic.id}
-                      orientation='horizontal'
-                      className='w-auto'
-                    >
-                      <Checkbox
-                        id={`${FORM_ID}-topic-${topic.id}`}
-                        checked={field.value.includes(topic.id)}
-                        onCheckedChange={(next) =>
-                          field.onChange(
-                            next
-                              ? [...field.value, topic.id]
-                              : field.value.filter((id) => id !== topic.id),
-                          )
-                        }
-                      />
-                      <FieldLabel
-                        htmlFor={`${FORM_ID}-topic-${topic.id}`}
-                        className='font-normal'
-                      >
-                        {topic.name}
-                      </FieldLabel>
-                    </Field>
-                  ))}
-                </div>
-              </FieldSet>
-            )}
-          />
-        ) : null}
       </FieldGroup>
     </FeedbackForm>
   );

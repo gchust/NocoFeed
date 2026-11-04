@@ -316,10 +316,19 @@ const zhCN: AppResource = {
     edit: '编辑主题',
     formDescription: '用平常的话描述目标，分析会据此匹配内容。',
     actionsFor: '{{name}} 的操作',
-    sources: '订阅源：',
+    sources: '判断范围：',
     allSources: '全部订阅源',
     openFeed: '在信息流中查看该主题',
-    noSources: '还没有订阅源，主题将适用于全部订阅源。',
+    noSources: '还没有订阅源，主题将判断全部订阅源带来的内容。',
+    noSearch: '不主动搜索，只判断订阅源带来的内容。',
+    noSearchPlatforms: '没有可搜索的平台。',
+    searchesFor: '搜索：',
+    searchesOn: '平台：',
+    searchSummary: '{{count}} 个搜索 · 每 {{frequency}} · 上次 {{lastRun}}',
+    searchesFailing: '{{count}} 个失败',
+    searchNow: '立即搜索',
+    searchStarted: '「{{name}}」开始搜索 {{count}} 项。',
+    searchStartedHint: '结果会陆续进入信息流，进度可在运行记录中查看。',
     empty: {
       title: '还没有主题',
       description: '没有主题时，内容只按你的兴趣匹配。',
@@ -329,7 +338,11 @@ const zhCN: AppResource = {
       goal: '目标',
       avoid: '排除',
       mode: '想获得什么',
-      sources: '订阅源',
+      sources: '判断哪些订阅源',
+      search: '主动搜索',
+      searchTerms: '搜索词',
+      searchPlatforms: '在这些平台搜索',
+      searchLimit: '每次搜索条数',
     },
     modes: { both: '两者兼顾', participate: '参与', learn: '学习' },
     modeHints: {
@@ -341,14 +354,24 @@ const zhCN: AppResource = {
       name: 'Agent 工程',
       goal: '构建 LLM Agent 的实战经验：工具调用、评估、记忆',
       avoid: '融资新闻、炒作帖',
+      searchTerms: 'AI Agent\nClaude Code',
     },
     hints: {
       goal: '目标中的词决定匹配哪些内容。',
-      sources: '不选择则适用于全部订阅源。',
+      sources:
+        '不选择则判断全部订阅源带来的内容。主题自己的搜索结果总会用它来判断。',
+      search:
+        'B 站、YouTube、小红书、X 这类平台靠搜索获取内容。填了搜索词，主题会在所选平台上定期搜索；不填则只判断订阅源带来的内容。',
+      searchTerms: '每行一个，最多 {{max}} 个。',
     },
     validation: {
       nameRequired: '请填写名称。',
       goalRequired: '请描述目标。',
+      tooManyTerms: '最多 {{max}} 个搜索词。',
+      platformRequired: '请至少选择一个平台。',
+      termLength:
+        '搜索词「{{term}}」需为 {{min}}–{{max}} 个字符，且不要以“-”开头。',
+      termRejected: '有搜索词不被所选平台接受，请检查长度后重试。',
     },
     created: '已创建主题「{{name}}」。',
     saved: '已保存主题「{{name}}」。',
@@ -460,7 +483,6 @@ const zhCN: AppResource = {
       name: '名称',
       frequency: '检查频率',
       candidateLimit: '每次读取条数',
-      topics: '主题',
     },
     placeholders: { name: 'HN 最新' },
     hints: {
@@ -469,7 +491,9 @@ const zhCN: AppResource = {
       collectorNeeded:
         '尚未配置 Docker Collector，这个订阅源会等到配置后再运行。',
       candidateLimit: '每次运行最多读取这么多条（1–100）。',
-      topics: '该订阅源的内容会与这些主题匹配；不选则与全部主题匹配。',
+      keywordInTopics:
+        '按关键词搜索，建议在兴趣主题里添加搜索词，结果会归到主题下。',
+      keywordInTopicsLink: '去兴趣主题',
     },
     validation: {
       operationRequired: '请选择要关注的对象。',

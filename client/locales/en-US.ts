@@ -334,10 +334,22 @@ const enUS = {
     formDescription:
       'Describe the goal in plain words; the analysis matches items against it.',
     actionsFor: 'Actions for {{name}}',
-    sources: 'Subscriptions:',
+    sources: 'Judges:',
     allSources: 'all subscriptions',
     openFeed: 'Show this topic in the feed',
-    noSources: 'No subscriptions yet. The topic applies to all of them.',
+    noSources:
+      'No subscriptions yet. The topic judges what every subscription brings in.',
+    noSearch: 'No searches; it only judges what subscriptions bring in.',
+    noSearchPlatforms: 'No platform can search.',
+    searchesFor: 'Searches for:',
+    searchesOn: 'On:',
+    searchSummary:
+      '{{count}} searches · every {{frequency}} · last run {{lastRun}}',
+    searchesFailing: '{{count}} failing',
+    searchNow: 'Search now',
+    searchStarted: '“{{name}}” started {{count}} searches.',
+    searchStartedHint:
+      'Results reach the feed as they come in; Runs shows the progress.',
     empty: {
       title: 'No topics yet',
       description:
@@ -348,7 +360,11 @@ const enUS = {
       goal: 'Goal',
       avoid: 'Avoid',
       mode: 'What you want from it',
-      sources: 'Subscriptions',
+      sources: 'Subscriptions to judge',
+      search: 'Search',
+      searchTerms: 'Search terms',
+      searchPlatforms: 'Search on',
+      searchLimit: 'Items per search',
     },
     modes: { both: 'Both', participate: 'Join in', learn: 'Learn' },
     modeHints: {
@@ -360,14 +376,25 @@ const enUS = {
       name: 'Agent engineering',
       goal: 'Practical experience building LLM agents: tool use, evaluation, memory',
       avoid: 'Funding news, hype threads',
+      searchTerms: 'AI agents\nClaude Code',
     },
     hints: {
       goal: 'The words in the goal decide what matches.',
-      sources: 'Choose none to apply the topic to every subscription.',
+      sources:
+        'Choose none to judge what every subscription brings in. The topic always judges its own search results.',
+      search:
+        'Bilibili, YouTube, Xiaohongshu and X are followed by searching. With search terms, the topic searches the chosen platforms on a schedule; without, it only judges what subscriptions bring in.',
+      searchTerms: 'One per line, up to {{max}}.',
     },
     validation: {
       nameRequired: 'Enter a name.',
       goalRequired: 'Describe the goal.',
+      tooManyTerms: 'Use at most {{max}} search terms.',
+      platformRequired: 'Choose at least one platform.',
+      termLength:
+        'The search term “{{term}}” must be {{min}}–{{max}} characters and must not start with “-”.',
+      termRejected:
+        'A search term was not accepted by the chosen platforms. Check its length and try again.',
     },
     created: 'Topic “{{name}}” created.',
     saved: 'Topic “{{name}}” saved.',
@@ -489,7 +516,6 @@ const enUS = {
       name: 'Name',
       frequency: 'Check every',
       candidateLimit: 'Items per run',
-      topics: 'Topics',
     },
     placeholders: { name: 'HN new stories' },
     hints: {
@@ -498,8 +524,9 @@ const enUS = {
       collectorNeeded:
         'The Docker Collector is not configured, so this subscription will wait until it is.',
       candidateLimit: 'At most this many items are read per run (1–100).',
-      topics:
-        'Items from this subscription are matched against these topics; none means all topics.',
+      keywordInTopics:
+        'To search by keyword, add search terms to a topic instead; the results are kept with the topic.',
+      keywordInTopicsLink: 'Go to topics',
     },
     validation: {
       operationRequired: 'Choose what to follow.',

@@ -7,6 +7,7 @@ the person's topics and experience, and the person keeps their own marks and not
 
 - Schema: `database/main/migrations/202610280001_create_feed.ts` (seven `feed*` tables, all scoped by `ownerId`) and
   `202611020003_feed_analysis_quality.ts` (quality, priority, gates), `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
+  `202611040001_feed_topic_searches.ts` (topic search terms, platforms, schedule; `feedSources.topicId`).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -43,6 +44,23 @@ the person's topics and experience, and the person keeps their own marks and not
   quiet). It is notified once until it recovers (`healthNotifiedAt`); configuration statuses (`unconfigured`,
   `unsupported`) do not count.
 
+## Topics and subscriptions
+
+- **Subscriptions** (`feedSources` with `topicId` null) follow a thing that exists without the person's topics: an
+  account, a channel, a community, an RSS feed, an HN list. Every topic can judge them.
+- **Topics** say what the person wants (goal, avoid, mode). `sourceIds` limits which subscriptions a topic judges;
+  empty means all of them. A topic's own searches are always judged by it (`topicsFor`).
+- **Search-driven platforms** (every platform with a `keyword` operation: `SEARCH_PLATFORMS` in `catalog.ts`) are
+  followed through topics: `searchTerms` × `searchPlatforms` (empty = every search platform) become `feedSources` rows
+  with `topicId` set, kept in step by `syncSearches` inside the topic's transaction. Only the topic changes them:
+  `/feedSources` lists direct subscriptions only, and PATCH/DELETE on a managed row answers `FEED_MANAGED_BY_TOPIC`.
+  `POST /feedTopics/:id/run` starts them in the background (202). Older keyword subscriptions made directly keep
+  working; the source form now points keyword searches to topics.
+- Inside a transaction use only its connection: on SQLite the transaction holds the only connection, so a query
+  through `database` deadlocks. Read what the transaction needs before it starts.
+- `UpdateTopicBody` has no defaults on purpose: Zod's `.partial()` still applies `.default()`, which would reset an
+  omitted field.
+
 ## Rules that keep it honest
 
 - Analysis and the person's state are separate tables. Re-analysing never touches favourites, notes or participation.
@@ -69,4 +87,6 @@ the person's topics and experience, and the person keeps their own marks and not
 `tests/database/feed-migration.test.ts` and `feed-engagement-migration.test.ts`, `tests/server/feed-routes.test.ts`
 (sessions and owner isolation), `tests/server/feed-engagement.test.ts` (feedback weights, digest, dismissal, follow-up
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
+`tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
+which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
 and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density).
