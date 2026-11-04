@@ -70,7 +70,8 @@ export interface AnalysisDraft {
   priority: number;
   /** Why the full analysis did not run. */
   gate: AnalysisGate | null;
-  engine: 'rules' | 'model';
+  /** `agent` is a runner agent of the Agents plugin that read the original itself (`agent-reader.ts`). */
+  engine: 'rules' | 'model' | 'agent';
   model: string | null;
   promptVersion: string;
 }

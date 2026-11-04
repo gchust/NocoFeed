@@ -1,3 +1,4 @@
+import concurrency from '@nocobase/app-plugin-concurrency/server';
 import foundation from '@nocobase/app-plugin-foundation/server';
 import defaultAccess from '@nocobase/app-plugin-authz-default-access/server';
 import sharingRules from '@nocobase/app-plugin-authz-sharing-rules/server';
@@ -21,6 +22,7 @@ import mail from '@nocobase/app-plugin-mail/server';
 import agents from '@nocobase/app-plugin-agents/server';
 
 const serverPlugins: AppServerPlugins = defineServerPlugins([
+  concurrency,
   authentication,
   authorization,
   defaultAccess,

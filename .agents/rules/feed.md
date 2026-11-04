@@ -8,6 +8,7 @@ the person's topics and experience, and the person keeps their own marks and not
 - Schema: `database/main/migrations/202610280001_create_feed.ts` (seven `feed*` tables, all scoped by `ownerId`) and
   `202611020003_feed_analysis_quality.ts` (quality, priority, gates), `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
   `202611040001_feed_topic_searches.ts` (topic search terms, platforms, schedule; `feedSources.topicId`).
+  `202611050001_feed_runner_agent.ts` (`feedProfiles.readerAgentId`, `feedRuns.agentRunId`/`agentResult`).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -84,6 +85,32 @@ the person's topics and experience, and the person keeps their own marks and not
 - Reddit refuses the JSON listing from most servers; the adapter falls back to the RSS feed and says so
   (`redditRssFallback`).
 
+## Runner agents
+
+The Agents plugin (`@nocobase/app-plugin-agents`, read its Skill in `.agents/skills/nocobase-app-plugin-agents/`)
+serves two things here: the model gateway above, and **runner agents** — coding tools (Claude Code, Codex, …) on a
+runtime someone connects, which can open pages themselves. NocoFeed hands one task to them:
+
+- **"Analyze again" on one item** (`agent-reader.ts`). When the person picks a runner agent under Interests & skills
+  (`feedProfiles.readerAgentId`, offered from the plugin's `useAgentOptions`), `reanalyzeItem` queues a run on the
+  `feedItem` subject instead of calling the model: the brief is `buildPrompt`'s system and prompt plus "open the original
+  and its discussion", carried in the run's input payload, so the claim's `assemble` only reads that input and the item
+  row (database reads on the claim connection, as the plugin requires). A `feedRuns` row (`stage: analyze`,
+  `agentRunId`) waits for it and the item detail shows `agentReading`; asking again while it reads queues nothing more.
+- The run's last message (`Run.summary`) must be the analysis JSON. `onRunFinished` only stores how the run ended on
+  `feedRuns.agentResult` inside the plugin's transaction; `settleAgentReads` (one second later, and on every
+  `collect-due-sources` tick) claims the row with a guarded `running → settling` update, parses the answer with
+  `parseModelAnswer` into an analysis with `engine: 'agent'`, or **falls back** to `analyzeItems` (model gateway, then
+  rules) with run status `fellBack` and the code `agentFailed` / `agentCancelled` / `agentAnswerUnreadable`.
+- Falls back at once, with no run queued, when no agent is chosen, the plugin is missing, or the agent is not workable
+  (disabled, removed). A queued run no runner takes fails `queuedExpired` after `AGENT_QUEUE_EXPIRY_MS` (30 min) and
+  falls back too. Agent analyses do not count against `dailyLimit`, which caps model-gateway calls.
+- Administration lives under System settings (`client/routes.ts`): AI models, **Agents** (enable what runtimes report),
+  **Runtimes** (connect a machine; `runtimes-connect` is labelled in `page-permission-titles.ts`) and **Agent usage**,
+  each behind the plugin's own page grant. Runs on `feedItem` are `private`: only the person who asked sees them.
+- Candidates not moved yet: topic searches on login-bound platforms (today the Collector) and the prefilter/batch
+  analysis, which stay on the model gateway because they run unattended in bulk.
+
 ## Tests
 
 `tests/database/feed-migration.test.ts` and `feed-engagement-migration.test.ts`, `tests/server/feed-routes.test.ts`
@@ -91,4 +118,6 @@ the person's topics and experience, and the person keeps their own marks and not
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
-and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density).
+and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density). Runner agents:
+`tests/server/feed-runner-agent.test.ts` (hand-off, assembly, settling, fallbacks; an `ensureSystem` agent stands in
+for a reported one), `tests/database/feed-runner-agent-migration.test.ts` and `tests/client/preferences-page.test.tsx`.

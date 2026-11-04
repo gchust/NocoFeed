@@ -33,6 +33,14 @@ const zhCN: AppResource = {
     runs: '运行记录',
     preferences: '兴趣与能力',
     models: 'AI 模型',
+    agents: '智能体',
+    runtimes: '运行环境',
+    agentUsage: '智能体用量',
+  },
+  agents: {
+    subjects: { feedItem: '信息条目' },
+    triggers: { analyze: '重新分析' },
+    pages: { runtimeConnect: '添加运行环境' },
   },
   app: { ...systemZhCN.app, title: 'NocoFeed' },
   feed: {
@@ -194,8 +202,14 @@ const zhCN: AppResource = {
       unconfigured: '缺少 Collector',
       unsupported: '不支持',
       analysisFailed: '分析失败',
+      fellBack: '已回退',
     },
     messages: {
+      agentFailed: 'Runner 智能体未能完成，已改由模型或规则分析。',
+      agentCancelled: 'Runner 智能体的运行被停止，已改由模型或规则分析。',
+      agentAnswerUnreadable:
+        'Runner 智能体没有给出分析结果，已改由模型或规则分析。',
+      itemGone: '分析完成前条目已被删除。',
       channelNotResolved: '找不到这个频道。',
       notAFeed: '这个地址不是 RSS 或 Atom 订阅。',
       collectorNotConfigured: '需要 Docker Collector，但尚未配置。',
@@ -300,6 +314,10 @@ const zhCN: AppResource = {
       evidence: '依据',
       uncertainty: '不确定之处',
       byModel: '由 {{model}} 分析',
+      byAgent: '由 Runner 智能体 {{agent}} 阅读原文后分析',
+      agentReading:
+        'Runner 智能体正在阅读原文（{{time}}发起）。完成后分析会显示在这里；若无法完成，将改由模型或规则分析。',
+      handedToAgent: '已交给你的 Runner 智能体。',
       byRules: '由关键词规则分析（未配置模型或今日额度已用完）',
       noAnalysis: '尚未分析。',
       coverage: '已读取的材料',
@@ -599,6 +617,11 @@ const zhCN: AppResource = {
       keepLearning: '保留可学习的内容',
       digestEnabled: '每日简报',
       digestHour: '推送时间',
+      readerAgentId: '“重新分析”使用的 Runner 智能体',
+    },
+    agent: {
+      none: '不使用：由 AI 模型和规则分析',
+      unavailable: '{{name}}（当前不可用）',
     },
     placeholders: {
       interests: 'LLM Agent、自托管、数据库',
@@ -617,6 +640,10 @@ const zhCN: AppResource = {
       digestEnabled:
         '每天把过去 24 小时最值得参与的 3 条和最值得学习的 1 条发到站内信；没有合适内容的日子不会打扰你。',
       digestHour: '按你的本地时间（{{zone}}）。',
+      readerAgentId:
+        'Runner 智能体会自己打开原文和讨论区，包括本服务器抓取不到的页面。未选择或它无法完成时，仍由模型和规则分析。',
+      readerAgentIdEmpty:
+        '还没有启用的 Runner 智能体。管理员可在 系统设置 → 运行环境 和 智能体 中连接运行环境并启用智能体。',
     },
     learned: {
       title: '从你的反馈中学到的',

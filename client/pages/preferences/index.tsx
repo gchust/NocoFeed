@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useApiClient, useToaster } from '@nocobase/app-client';
+import { useAgentOptions } from '@nocobase/app-plugin-agents/client/kit';
 import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import { CpuIcon, TrendingDownIcon, TrendingUpIcon } from 'lucide-react';
 import {
@@ -132,6 +133,9 @@ function ModelStatus({ catalog }: { readonly catalog: Catalog }): ReactElement {
   );
 }
 
+/** The select's value for "no runner agent": Analyze again stays with the model and the rules. */
+const NO_AGENT = 'none';
+
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const hourLabel = (hour: number): string =>
   `${String(hour).padStart(2, '0')}:00`;
@@ -263,9 +267,33 @@ function PreferencesForm({
         keepLearning: z.boolean(),
         digestEnabled: z.boolean(),
         digestHour: z.number().int().min(0).max(23),
+        readerAgentId: z.string(),
       }),
     [t],
   );
+  const agentOptions = useAgentOptions();
+  const agentItems = useMemo(() => {
+    const items = [
+      { value: NO_AGENT, label: t('preferences.agent.none') },
+      ...agentOptions.options.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+    ];
+    // A chosen agent that was disabled since stays visible, so the person sees why their analyses fall back.
+    if (
+      profile.readerAgentId &&
+      !items.some((item) => item.value === profile.readerAgentId)
+    )
+      items.push({
+        value: profile.readerAgentId,
+        label: t('preferences.agent.unavailable', {
+          name:
+            agentOptions.nameOf(profile.readerAgentId) ?? profile.readerAgentId,
+        }),
+      });
+    return items;
+  }, [agentOptions, profile.readerAgentId, t]);
 
   const form = useForm({
     shouldFocusError: false,
@@ -278,6 +306,7 @@ function PreferencesForm({
       keepLearning: profile.keepLearning,
       digestEnabled: profile.digestEnabled,
       digestHour: profile.digestHour,
+      readerAgentId: profile.readerAgentId ?? NO_AGENT,
     },
   });
 
@@ -290,6 +319,8 @@ function PreferencesForm({
         // The digest hour is read in the browser's time zone.
         json: {
           ...values,
+          readerAgentId:
+            values.readerAgentId === NO_AGENT ? null : values.readerAgentId,
           locale: locale === 'zh-CN' ? 'zh-CN' : 'en-US',
           timeZone: browserZone,
         },
@@ -302,6 +333,7 @@ function PreferencesForm({
         keepLearning: data.keepLearning,
         digestEnabled: data.digestEnabled,
         digestHour: data.digestHour,
+        readerAgentId: data.readerAgentId ?? NO_AGENT,
       });
       toaster.show({
         type: 'success',
@@ -507,6 +539,45 @@ function PreferencesForm({
                 )}
               />
             ) : null}
+            <Controller
+              control={form.control}
+              name='readerAgentId'
+              render={({ field }) => (
+                <Field className='max-w-md'>
+                  <FieldLabel htmlFor={`${FORM_ID}-readerAgentId`}>
+                    {t('preferences.fields.readerAgentId')}
+                  </FieldLabel>
+                  <Select
+                    items={agentItems}
+                    value={field.value}
+                    onValueChange={(value) =>
+                      field.onChange(String(value ?? NO_AGENT))
+                    }
+                  >
+                    <SelectTrigger
+                      id={`${FORM_ID}-readerAgentId`}
+                      className='w-full'
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {agentItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {agentOptions.options.length
+                      ? t('preferences.hints.readerAgentId')
+                      : t('preferences.hints.readerAgentIdEmpty')}
+                  </FieldDescription>
+                </Field>
+              )}
+            />
           </FieldGroup>
         </FeedbackForm>
       </CardContent>

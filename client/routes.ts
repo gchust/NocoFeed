@@ -1,9 +1,17 @@
-import { modelsRoute } from '@nocobase/app-plugin-agents/client/routes';
 import {
+  agentsRoute,
+  modelsRoute,
+  runtimesRoute,
+  usageRoute,
+} from '@nocobase/app-plugin-agents/client/routes';
+import {
+  BarChart3,
+  Bot,
   Cpu,
   History,
   Newspaper,
   Rss,
+  Server,
   SlidersHorizontal,
   Tags,
 } from 'lucide-react';
@@ -135,14 +143,35 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
   },
 ]);
 
-// The model services the analysis uses, under System settings beside users and roles. The page and its API stand
-// behind `settings:agents.services`, so only administrators who may configure models see it.
+// The Agents plugin's administration, under System settings beside users and roles. AI models are the model services
+// the analysis uses (behind `settings:agents.services`). Agents, Runtimes and Agent usage administer the runner agents
+// "Analyze again" can be handed to (`server/providers/feed/agent-reader.ts`): connecting a runtime, enabling the
+// agents it reports, and what their runs used. Each of those three stands behind its own page grant (`PAGES` in
+// `@nocobase/app-plugin-agents/shared/access`), which only unrestricted administrators hold until a role is given it.
 const modelSettingsRoutes: AppClientRouteContribution = defineAppRoutes([
   {
     ...modelsRoute,
     parent: 'settings',
     navigation: { title: 'navigation.models', icon: Cpu },
     breadcrumb: { title: 'navigation.models' },
+  },
+  {
+    ...agentsRoute,
+    parent: 'settings',
+    navigation: { title: 'navigation.agents', icon: Bot },
+    breadcrumb: { title: 'navigation.agents' },
+  },
+  {
+    ...runtimesRoute,
+    parent: 'settings',
+    navigation: { title: 'navigation.runtimes', icon: Server },
+    breadcrumb: { title: 'navigation.runtimes' },
+  },
+  {
+    ...usageRoute,
+    parent: 'settings',
+    navigation: { title: 'navigation.agentUsage', icon: BarChart3 },
+    breadcrumb: { title: 'navigation.agentUsage' },
   },
 ]);
 

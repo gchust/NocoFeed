@@ -41,6 +41,15 @@ const enUS = {
     runs: 'Runs',
     preferences: 'Interests & skills',
     models: 'AI models',
+    agents: 'Agents',
+    runtimes: 'Runtimes',
+    agentUsage: 'Agent usage',
+  },
+  // What the Agents plugin's pages call NocoFeed's subject and why its runs start (`agent-reader.ts`).
+  agents: {
+    subjects: { feedItem: 'Feed item' },
+    triggers: { analyze: 'Analyse again' },
+    pages: { runtimeConnect: 'Add runtime' },
   },
   app: { ...systemEnUS.app, title: 'NocoFeed' },
   feed: {
@@ -206,8 +215,16 @@ const enUS = {
       unconfigured: 'Collector missing',
       unsupported: 'Not supported',
       analysisFailed: 'Analysis failed',
+      fellBack: 'Fell back',
     },
     messages: {
+      agentFailed:
+        'The runner agent could not finish, so the model or the rules analysed it.',
+      agentCancelled:
+        'The runner agent run was stopped, so the model or the rules analysed it.',
+      agentAnswerUnreadable:
+        'The runner agent did not answer with an analysis, so the model or the rules analysed it.',
+      itemGone: 'The item was deleted before the analysis finished.',
       channelNotResolved: 'The channel could not be found.',
       notAFeed: 'The address is not an RSS or Atom feed.',
       collectorNotConfigured:
@@ -318,6 +335,10 @@ const enUS = {
       evidence: 'Based on',
       uncertainty: 'Not certain',
       byModel: 'Analysed by {{model}}',
+      byAgent: 'Read and analysed by the runner agent {{agent}}',
+      agentReading:
+        'A runner agent is reading the original (asked {{time}}). The analysis appears here when it finishes; if it cannot, the model or the rules analyse the item instead.',
+      handedToAgent: 'Handed to your runner agent.',
       byRules:
         'Analysed by keyword rules (no model configured or budget used up)',
       noAnalysis: 'Not analysed yet.',
@@ -639,6 +660,11 @@ const enUS = {
       keepLearning: 'Keep items worth learning',
       digestEnabled: 'Daily digest',
       digestHour: 'Send after',
+      readerAgentId: 'Runner agent for “Analyse again”',
+    },
+    agent: {
+      none: 'None: use the AI model and the rules',
+      unavailable: '{{name}} (not available now)',
     },
     placeholders: {
       interests: 'LLM agents, self-hosting, databases',
@@ -658,6 +684,10 @@ const enUS = {
       digestEnabled:
         'Once a day, your inbox gets the best three discussions and the best learning item of the last 24 hours. Days with nothing worth it send nothing.',
       digestHour: 'Your local time ({{zone}}).',
+      readerAgentId:
+        'A runner agent opens the original and its discussion itself, including pages this server cannot fetch. Without one, or when it cannot finish, the model and the rules analyse as before.',
+      readerAgentIdEmpty:
+        'No runner agent is enabled. An administrator connects a runtime and enables agents under System settings → Runtimes and Agents.',
     },
     learned: {
       title: 'Learned from your feedback',

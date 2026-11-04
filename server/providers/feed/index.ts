@@ -13,6 +13,7 @@ import {
 
 import type { FeedConfig } from '../../config/feed.js';
 import { createAdapters } from './adapters.js';
+import { feedItemSubject } from './agent-reader.js';
 import { createFeedService, type FeedService } from './service.js';
 
 export type { FeedService } from './service.js';
@@ -31,6 +32,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
   public readonly name: string = 'nocofeed/feed-provider';
 
   private executor: ScheduleExecutor | undefined;
+
+  private unregisterSubject: (() => void) | undefined;
 
   public override register(): void {
     this.app.container.singleton(feedServiceToken, () => {
@@ -73,6 +76,25 @@ export default class FeedProvider extends ServiceProvider<Application> {
     });
   }
 
+  /**
+   * Contributes the `feedItem` subject to the Agents plugin, so "Analyze again" can be handed to a runner agent
+   * (`agent-reader.ts`). Without the plugin, analysis stays with the model gateway and the rules.
+   */
+  public override async boot(): Promise<void> {
+    if (!this.app.container.has(agentsToken)) return;
+    const agents = this.app.container.resolve(agentsToken);
+    const settle = () => {
+      // After the plugin's transaction commits; the schedule below catches anything this misses.
+      setTimeout(() => {
+        void this.app.container
+          .resolve(feedServiceToken)
+          .settleAgentReads()
+          .catch(() => undefined);
+      }, 1_000).unref();
+    };
+    this.unregisterSubject = agents.subjects.register(feedItemSubject(settle));
+  }
+
   public override async start(): Promise<void> {
     if (!this.app.container.has(jobExecutorServiceToken)) return;
     const tick = this.app.config.get<FeedConfig>('feed')?.tickMinutes ?? 5;
@@ -84,7 +106,9 @@ export default class FeedProvider extends ServiceProvider<Application> {
       options: { every: tick * 60_000 },
       payload: {},
       execute: async () => {
-        await this.app.container.resolve(feedServiceToken).runDue();
+        const feed = this.app.container.resolve(feedServiceToken);
+        await feed.settleAgentReads();
+        await feed.runDue();
       },
     });
     await this.executor.addJob({
@@ -107,6 +131,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
   }
 
   public override async shutdown(): Promise<void> {
+    this.unregisterSubject?.();
     await this.executor?.shutdown();
   }
 }
