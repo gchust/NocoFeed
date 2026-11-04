@@ -55,7 +55,7 @@ const enUS = {
   feed: {
     title: 'Feed',
     description:
-      'What your subscriptions brought in, ranked by how well it matches your topics and what it is worth. Each item says what to join or learn, and on which material that judgement rests.',
+      'What your subscriptions brought in, newest first. Each item says what to join or learn, and on which material that judgement rests.',
     refresh: 'Refresh',
     listLabel: 'Items',
     loadMore: 'Load more',
@@ -104,6 +104,13 @@ const enUS = {
         newest: 'Newest first',
       },
     },
+    read: {
+      unreadOnly: 'Unread only',
+      markAllRead: 'Mark all as read',
+      markedAll: 'Marked {{count}} as read',
+      unreadCount: '{{count}} unread',
+      unread: 'Unread',
+    },
     platforms: {
       reddit: 'Reddit',
       hn: 'Hacker News',
@@ -124,6 +131,7 @@ const enUS = {
       later: 'Later',
       participated: 'Joined',
       dismissed: 'Dismiss',
+      unread: 'Mark unread',
     },
     feedback: {
       helpful: 'Useful',
@@ -170,6 +178,7 @@ const enUS = {
       favorite: 'Save or unsave',
       later: 'Read later, or not',
       dismiss: 'Dismiss from the feed',
+      read: 'Mark read or unread',
       open: 'Open the original',
       close: 'Close the item',
       help: 'Show this help',
@@ -177,6 +186,8 @@ const enUS = {
       favoriteOff: 'Removed from saved',
       laterOn: 'Added to Later',
       laterOff: 'Removed from Later',
+      readOn: 'Marked as read',
+      readOff: 'Marked as unread',
       dismissed: 'Dismissed',
       undo: 'Undo',
     },

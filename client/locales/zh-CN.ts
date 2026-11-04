@@ -46,7 +46,7 @@ const zhCN: AppResource = {
   feed: {
     title: '信息流',
     description:
-      '订阅源带回的内容，按匹配度和内容价值排序。每条都说明适合参与还是学习，以及判断依据的是哪些材料。',
+      '订阅源带回的内容，最新发布的在前。每条都说明适合参与还是学习，以及判断依据的是哪些材料。',
     refresh: '刷新',
     listLabel: '内容列表',
     loadMore: '加载更多',
@@ -95,6 +95,13 @@ const zhCN: AppResource = {
         newest: '最新发布',
       },
     },
+    read: {
+      unreadOnly: '只看未读',
+      markAllRead: '全部标为已读',
+      markedAll: '已将 {{count}} 条标为已读',
+      unreadCount: '{{count}} 条未读',
+      unread: '未读',
+    },
     platforms: {
       reddit: 'Reddit',
       hn: 'Hacker News',
@@ -115,6 +122,7 @@ const zhCN: AppResource = {
       later: '稍后看',
       participated: '已参与',
       dismissed: '移出信息流',
+      unread: '标为未读',
     },
     feedback: {
       helpful: '有用',
@@ -158,6 +166,7 @@ const zhCN: AppResource = {
       favorite: '收藏 / 取消收藏',
       later: '稍后看 / 取消',
       dismiss: '移出信息流',
+      read: '标为已读 / 未读',
       open: '打开原文',
       close: '关闭详情',
       help: '显示本帮助',
@@ -165,6 +174,8 @@ const zhCN: AppResource = {
       favoriteOff: '已取消收藏',
       laterOn: '已加入稍后看',
       laterOff: '已移出稍后看',
+      readOn: '已标为已读',
+      readOff: '已标为未读',
       dismissed: '已移出信息流',
       undo: '撤销',
     },

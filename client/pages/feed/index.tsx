@@ -11,6 +11,7 @@ import {
   GraduationCapIcon,
   CheckCheckIcon,
   LayersIcon,
+  MailCheckIcon,
   RefreshCwIcon,
   Rows3Icon,
   SearchIcon,
@@ -132,8 +133,10 @@ export default function FeedPage(): ReactElement {
   )
     ? (params.get('period') as FeedPeriod)
     : undefined;
+  // Newest first unless the person chose otherwise.
   const sort: FeedSort =
-    params.get('sort') === 'newest' ? 'newest' : 'priority';
+    params.get('sort') === 'priority' ? 'priority' : 'newest';
+  const unreadOnly = params.get('unread') === '1';
   const q = params.get('q') ?? '';
   const selectedId = Number(params.get('item')) || undefined;
 
@@ -149,8 +152,21 @@ export default function FeedPage(): ReactElement {
   // Lists, counts and topics reload together after the page's own writes and on "Refresh".
   const [reloadCount, setReloadCount] = useState(0);
   const reload = useCallback(() => setReloadCount((count) => count + 1), []);
+  // What the page learnt about items being read since the last reload; the digest cards show it.
+  const [readOverrides, setReadOverrides] = useState<{
+    readonly version: number;
+    readonly read: ReadonlyMap<number, boolean>;
+  }>(() => ({ version: 0, read: new Map() }));
 
-  const filterKey = JSON.stringify([view, platform, topicId, q, period, sort]);
+  const filterKey = JSON.stringify([
+    view,
+    platform,
+    topicId,
+    q,
+    period,
+    sort,
+    unreadOnly,
+  ]);
   const requestKey = `${filterKey}:${reloadCount}`;
   const [list, setList] = useState<ListResult>();
   const [loadingMore, setLoadingMore] = useState(false);
@@ -171,6 +187,7 @@ export default function FeedPage(): ReactElement {
           topicId,
           q: q || undefined,
           period,
+          unread: unreadOnly ? 'true' : undefined,
           sort,
           pageSize: PAGE_SIZE,
         },
@@ -186,7 +203,18 @@ export default function FeedPage(): ReactElement {
         },
       );
     return () => controller.abort();
-  }, [api, filterKey, reloadCount, view, platform, topicId, q, period, sort]);
+  }, [
+    api,
+    filterKey,
+    reloadCount,
+    view,
+    platform,
+    topicId,
+    q,
+    period,
+    sort,
+    unreadOnly,
+  ]);
 
   // Counts alone reload after a keyboard action, so the list keeps its place.
   const [countsVersion, setCountsVersion] = useState(0);
@@ -198,7 +226,13 @@ export default function FeedPage(): ReactElement {
     api
       .request<{ data: FeedSummary }>({
         path: 'feedItems/summary',
-        query: { platform, topicId, q: q || undefined, period },
+        query: {
+          platform,
+          topicId,
+          q: q || undefined,
+          period,
+          unread: unreadOnly ? 'true' : undefined,
+        },
         signal: controller.signal,
       })
       .then(
@@ -209,7 +243,16 @@ export default function FeedPage(): ReactElement {
         () => undefined,
       );
     return () => controller.abort();
-  }, [api, reloadCount, countsVersion, platform, topicId, q, period]);
+  }, [
+    api,
+    reloadCount,
+    countsVersion,
+    platform,
+    topicId,
+    q,
+    period,
+    unreadOnly,
+  ]);
   useEffect(() => {
     const controller = new AbortController();
     api
@@ -249,6 +292,7 @@ export default function FeedPage(): ReactElement {
           topicId,
           q: q || undefined,
           period,
+          unread: unreadOnly ? 'true' : undefined,
           sort,
           pageSize: PAGE_SIZE,
           pageToken: token,
@@ -276,8 +320,15 @@ export default function FeedPage(): ReactElement {
       );
   };
 
-  // A change made in the detail shows on the card at once; the counts follow with the next reload.
+  // A change made in the detail shows on the card at once, and the counts follow.
   const onStateChange = (id: number, state: ItemState): void => {
+    setCountsVersion((count) => count + 1);
+    setReadOverrides((current) => ({
+      version: reloadCount,
+      read: new Map(
+        current.version === reloadCount ? current.read : undefined,
+      ).set(id, state.read),
+    }));
     setList((current) =>
       current?.items
         ? {
@@ -289,6 +340,7 @@ export default function FeedPage(): ReactElement {
                     favorite: state.favorite,
                     later: state.later,
                     participated: state.participated,
+                    read: state.read,
                     newReplies: state.followUp?.newReplies ?? 0,
                   }
                 : item,
@@ -312,9 +364,46 @@ export default function FeedPage(): ReactElement {
   const [detailVersion, setDetailVersion] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  // Opening an item reads it once per opening: a detail shown again after "Mark unread" leaves it unread.
+  const [readOpening, setReadOpening] = useState<number>();
+  const [openedId, setOpenedId] = useState(selectedId);
+  if (openedId !== selectedId) {
+    setOpenedId(selectedId);
+    setReadOpening(undefined);
+  }
+
+  const [markingAll, setMarkingAll] = useState(false);
+  const markAllRead = async (): Promise<void> => {
+    if (view === 'digest') return;
+    setMarkingAll(true);
+    try {
+      const { data } = await api.request<{ data: { marked: number } }>({
+        path: 'feedItems/markRead',
+        method: 'POST',
+        json: { view, platform, topicId, q: q || undefined, period },
+      });
+      toaster.show({
+        id: 'feed-marked-all',
+        type: 'success',
+        title: t('feed.read.markedAll', { count: data.marked }),
+      });
+      reload();
+      if (selectedId) setDetailVersion((count) => count + 1);
+    } catch (cause: unknown) {
+      toaster.show({
+        type: 'error',
+        title: t(`feed.errors.${requestProblem(cause)}`),
+      });
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
   const patchState = async (
     item: FeedListItem,
-    changes: Partial<Pick<ItemState, 'favorite' | 'later' | 'dismissed'>>,
+    changes: Partial<
+      Pick<ItemState, 'favorite' | 'later' | 'dismissed' | 'read'>
+    >,
   ): Promise<ItemState | undefined> => {
     try {
       const { data } = await api.request<{ data: ItemState }>({
@@ -403,7 +492,8 @@ export default function FeedPage(): ReactElement {
       void dismiss(current);
       return;
     }
-    const key = action === 'favorite' ? 'favorite' : 'later';
+    const key =
+      action === 'favorite' ? 'favorite' : action === 'read' ? 'read' : 'later';
     void patchState(current, { [key]: !current[key] }).then((state) => {
       if (!state) return;
       onStateChange(current.id, state);
@@ -426,8 +516,9 @@ export default function FeedPage(): ReactElement {
 
   const topicNames = new Map(topics.map((topic) => [topic.id, topic.name]));
   const filtered = Boolean(
-    platform || topicId || q || period || view !== 'all',
+    platform || topicId || q || period || unreadOnly || view !== 'all',
   );
+  const unreadInView = view === 'digest' ? 0 : (summary?.unread[view] ?? 0);
 
   const detail = selectedId ? (
     <ItemDetail
@@ -437,6 +528,8 @@ export default function FeedPage(): ReactElement {
       onClose={() => update({ item: undefined })}
       onStateChange={onStateChange}
       onChanged={reload}
+      autoRead={readOpening !== selectedId}
+      onAutoRead={() => setReadOpening(selectedId)}
     />
   ) : null;
 
@@ -484,6 +577,7 @@ export default function FeedPage(): ReactElement {
           topicId={topicId}
           period={period}
           sort={sort}
+          unreadOnly={unreadOnly}
           topics={topics}
           onChange={update}
         />
@@ -512,6 +606,11 @@ export default function FeedPage(): ReactElement {
             <DigestPanel
               reloadCount={reloadCount}
               selectedId={selectedId}
+              readOverrides={
+                readOverrides.version === reloadCount
+                  ? readOverrides.read
+                  : undefined
+              }
               topicNames={topicNames}
               onSelect={(id) => update({ item: String(id) })}
               onRetry={reload}
@@ -526,6 +625,32 @@ export default function FeedPage(): ReactElement {
                     onSearch={(value) => update({ q: value, item: undefined })}
                   />
                 </div>
+                <Button
+                  type='button'
+                  variant='outline'
+                  aria-pressed={unreadOnly}
+                  className='shrink-0 aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary'
+                  onClick={() =>
+                    update({
+                      unread: unreadOnly ? undefined : '1',
+                      item: undefined,
+                    })
+                  }
+                >
+                  {t('feed.read.unreadOnly')}
+                </Button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  className='shrink-0'
+                  aria-label={t('feed.read.markAllRead')}
+                  title={t('feed.read.markAllRead')}
+                  disabled={markingAll || unreadInView === 0}
+                  onClick={() => void markAllRead()}
+                >
+                  {markingAll ? <Spinner /> : <MailCheckIcon />}
+                </Button>
                 <div
                   role='group'
                   aria-label={t('feed.density.label')}
@@ -564,6 +689,7 @@ export default function FeedPage(): ReactElement {
                       platform: undefined,
                       topic: undefined,
                       period: undefined,
+                      unread: undefined,
                       q: undefined,
                     })
                   }
@@ -664,6 +790,7 @@ function FeedRail({
   topicId,
   period,
   sort,
+  unreadOnly,
   topics,
   onChange,
 }: {
@@ -673,6 +800,8 @@ function FeedRail({
   readonly topicId?: number;
   readonly period?: FeedPeriod;
   readonly sort: FeedSort;
+  /** The counts already count only unread items; no separate unread figure. */
+  readonly unreadOnly: boolean;
   readonly topics: readonly Topic[];
   readonly onChange: (changes: Record<string, string | undefined>) => void;
 }): ReactElement {
@@ -737,6 +866,9 @@ function FeedRail({
                   >
                     +{summary.newReplies}
                   </span>
+                ) : null}
+                {summary && value !== 'digest' && !unreadOnly ? (
+                  <UnreadCount count={summary.unread[value]} />
                 ) : null}
                 <span className='text-xs tabular-nums'>
                   {summary && value !== 'digest' ? summary[value] : ''}
@@ -831,7 +963,7 @@ function FeedRail({
           onValueChange={(value) =>
             onChange({
               // The default order stays out of the address.
-              sort: value === 'newest' ? 'newest' : undefined,
+              sort: value === 'priority' ? 'priority' : undefined,
               item: undefined,
             })
           }
@@ -851,6 +983,25 @@ function FeedRail({
         </Select>
       </div>
     </nav>
+  );
+}
+
+function UnreadCount({
+  count,
+}: {
+  readonly count: number;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  if (!count) return null;
+  const label = t('feed.read.unreadCount', { count });
+  return (
+    <span
+      className='rounded-full bg-primary/10 px-1.5 text-xs font-medium text-primary tabular-nums'
+      title={label}
+      aria-label={label}
+    >
+      {count}
+    </span>
   );
 }
 

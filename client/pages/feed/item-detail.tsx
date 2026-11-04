@@ -5,6 +5,7 @@ import {
   BookmarkIcon,
   CheckCheckIcon,
   ChevronDownIcon,
+  CircleDotIcon,
   ClockIcon,
   DownloadIcon,
   EyeOffIcon,
@@ -16,7 +17,13 @@ import {
   ThumbsUpIcon,
   XIcon,
 } from 'lucide-react';
-import { type ReactElement, type ReactNode, useEffect, useState } from 'react';
+import {
+  type ReactElement,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { SessionExpiredAlert } from '#components/session-expired-alert';
 import { StatusBadge } from '#components/status-badge';
@@ -58,6 +65,13 @@ export interface ItemDetailProps {
   readonly onStateChange: (id: number, state: ItemState) => void;
   /** The analysis or the counts changed; the list reloads. */
   readonly onChanged: () => void;
+  /**
+   * Opening the item marks it read. False when the page has already done so for this opening, so a detail shown again
+   * after the person marked it unread does not read it again.
+   */
+  readonly autoRead?: boolean;
+  /** Called once when the opened item has been taken as read. */
+  readonly onAutoRead?: () => void;
 }
 
 type Busy =
@@ -67,6 +81,7 @@ type Busy =
   | 'later'
   | 'participated'
   | 'dismissed'
+  | 'read'
   | 'feedback';
 
 /** One item: what the agent concluded, on which material, and the person's own record of it. */
@@ -76,6 +91,8 @@ export function ItemDetail({
   onClose,
   onStateChange,
   onChanged,
+  autoRead = true,
+  onAutoRead,
 }: ItemDetailProps): ReactElement {
   const { t, i18n } = useTranslation();
   const api = useApiClient();
@@ -112,6 +129,42 @@ export function ItemDetail({
   const loading = result?.key !== reloadCount;
   const item = result?.item;
   const error = loading ? undefined : result?.error;
+
+  // Opening an item reads it: once, quietly, without reloading the list. A failure leaves it unread and says nothing.
+  const autoReadRef = useRef({ enabled: autoRead, onAutoRead, onStateChange });
+  useEffect(() => {
+    autoReadRef.current = { enabled: autoRead, onAutoRead, onStateChange };
+  });
+  const loadedItem = result?.item;
+  const readOnOpen =
+    loadedItem && !loadedItem.state.read ? loadedItem.id : undefined;
+  const loadedId = loadedItem?.id;
+  useEffect(() => {
+    const { enabled, onAutoRead: done } = autoReadRef.current;
+    if (loadedId === undefined || !enabled) return;
+    done?.();
+    if (readOnOpen === undefined) return;
+    api
+      .request<{ data: ItemState }>({
+        path: `feedItems/${encodeURIComponent(readOnOpen)}/state`,
+        method: 'PATCH',
+        json: { read: true },
+      })
+      .then(
+        ({ data: state }) => {
+          setResult((current) =>
+            current?.item?.id === readOnOpen
+              ? {
+                  ...current,
+                  item: { ...current.item, read: state.read, state },
+                }
+              : current,
+          );
+          autoReadRef.current.onStateChange(readOnOpen, state);
+        },
+        () => undefined,
+      );
+  }, [api, loadedId, readOnOpen]);
 
   const replace = (next: FeedItem): void =>
     setResult({ key: reloadCount, item: next });
@@ -357,6 +410,14 @@ export function ItemDetail({
                 'participated',
               )
             }
+          />
+          <ToggleButton
+            pressed={!item.state.read}
+            busy={busy === 'read'}
+            disabled={Boolean(busy)}
+            icon={<CircleDotIcon />}
+            label={t('feed.state.unread')}
+            onClick={() => void patchState({ read: !item.state.read }, 'read')}
           />
           <ToggleButton
             pressed={item.state.dismissed}
