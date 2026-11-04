@@ -45,6 +45,7 @@ const listItem: FeedListItem = {
   favorite: false,
   later: false,
   participated: false,
+  read: false,
   newReplies: 0,
 };
 
@@ -57,6 +58,7 @@ const state: ItemState = {
   participationUrl: null,
   participationNote: null,
   dismissed: false,
+  read: false,
   followUp: null,
 };
 
@@ -137,7 +139,13 @@ const videoDetail: FeedItem = {
 
 let itemsResponse: unknown;
 let summaryUnhealthy = 0;
-const api = vi.fn(({ method, path, query }: ApiCall) => {
+// The person's marks as the server keeps them: each PATCH changes only what it sends.
+let states: Record<string, ItemState> = {};
+const patched = (id: string, changes: unknown) => {
+  states[id] = { ...(states[id] ?? state), ...(changes as object) };
+  return { data: states[id] };
+};
+const api = vi.fn(({ method, path, query, json }: ApiCall) => {
   if (method === 'GET' && path === 'feedItems') return itemsResponse;
   if (method === 'GET' && path === 'feedItems/summary')
     return {
@@ -149,6 +157,14 @@ const api = vi.fn(({ method, path, query }: ApiCall) => {
         saved: 0,
         later: 0,
         participated: 0,
+        unread: {
+          all: query?.unread ? 12 : 5,
+          discuss: 1,
+          learn: 0,
+          saved: 0,
+          later: 0,
+          participated: 0,
+        },
         newReplies: 0,
         unhealthySources: summaryUnhealthy,
       },
@@ -173,7 +189,9 @@ const api = vi.fn(({ method, path, query }: ApiCall) => {
     };
   if (method === 'GET' && path === 'feedItems/7') return { data: detail };
   if (method === 'PATCH' && path === 'feedItems/7/state')
-    return { data: { ...state, favorite: true } };
+    return patched('7', json);
+  if (method === 'POST' && path === 'feedItems/markRead')
+    return { data: { marked: 5 } };
   if (method === 'GET' && path === 'feedItems/9') return { data: noteDetail };
   if (method === 'GET' && path === 'feedItems/11') return { data: videoDetail };
   if (method === 'GET' && path === 'feedItems/10')
@@ -193,7 +211,7 @@ const api = vi.fn(({ method, path, query }: ApiCall) => {
   if (method === 'GET' && path === 'feedItems/8')
     return { data: { ...detail, id: 8, title: 'Second item' } };
   if (method === 'PATCH' && path === 'feedItems/8/state')
-    return { data: { ...state, dismissed: true } };
+    return patched('8', json);
   return new Response(null, { status: 404 });
 });
 
@@ -231,6 +249,7 @@ describe('feed page', () => {
     );
     api.mockClear();
     summaryUnhealthy = 0;
+    states = {};
     itemsResponse = { data: [listItem], meta: {} };
   });
 
@@ -291,7 +310,7 @@ describe('feed page', () => {
     );
   });
 
-  it('narrows the list to a publication period and sorts it newest first', async () => {
+  it('lists newest first by default, narrows to a period and sorts by priority on request', async () => {
     const user = userEvent.setup();
     await renderAt('/');
     const rail = await screen.findByRole('navigation', {
@@ -311,7 +330,7 @@ describe('feed page', () => {
         expect.objectContaining({
           method: 'GET',
           path: 'feedItems',
-          query: expect.objectContaining({ period: 'week', sort: 'priority' }),
+          query: expect.objectContaining({ period: 'week', sort: 'newest' }),
         }),
       ),
     );
@@ -329,7 +348,7 @@ describe('feed page', () => {
     );
     await user.click(
       await screen.findByRole('option', {
-        name: enUS.feed.filters.sorts.newest,
+        name: enUS.feed.filters.sorts.priority,
       }),
     );
     await waitFor(() =>
@@ -337,10 +356,162 @@ describe('feed page', () => {
         expect.objectContaining({
           method: 'GET',
           path: 'feedItems',
-          query: expect.objectContaining({ period: 'week', sort: 'newest' }),
+          query: expect.objectContaining({ period: 'week', sort: 'priority' }),
         }),
       ),
     );
+  });
+
+  it('marks an item read when it is opened and unread again on request', async () => {
+    itemsResponse = {
+      data: [
+        listItem,
+        { ...listItem, id: 8, title: 'Second item', read: true },
+      ],
+      meta: {},
+    };
+    await renderAt('/');
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const first = await within(list).findByRole('button', {
+      name: /evaluate agent tool use/,
+    });
+    const second = within(list).getByRole('button', { name: /Second item/ });
+    // Unread items stand apart, and say so to a screen reader.
+    expect(first).toHaveAttribute('data-read', 'false');
+    expect(first).toHaveTextContent(enUS.feed.read.unread);
+    expect(second).toHaveAttribute('data-read', 'true');
+    expect(second).not.toHaveTextContent(enUS.feed.read.unread);
+
+    await userEvent.click(first);
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'PATCH',
+          path: 'feedItems/7/state',
+          json: { read: true },
+        }),
+      ),
+    );
+    await waitFor(() => expect(first).toHaveAttribute('data-read', 'true'));
+
+    const markUnread = await screen.findByRole('button', {
+      name: enUS.feed.state.unread,
+      pressed: false,
+    });
+    await userEvent.click(markUnread);
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'PATCH',
+          path: 'feedItems/7/state',
+          json: { read: false },
+        }),
+      ),
+    );
+    expect(
+      await screen.findByRole('button', {
+        name: enUS.feed.state.unread,
+        pressed: true,
+      }),
+    ).toBeInTheDocument();
+    // Still open, it is not read again behind the person's back.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const reads = api.mock.calls.filter(
+      ([call]) =>
+        call.method === 'PATCH' &&
+        (call.json as { read?: boolean } | undefined)?.read === true,
+    );
+    expect(reads).toHaveLength(1);
+  });
+
+  it('toggles read with the keyboard', async () => {
+    itemsResponse = {
+      data: [{ ...listItem, read: true }],
+      meta: {},
+    };
+    states = { '7': { ...state, read: true } };
+    await renderAt('/?item=7');
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const card = await within(list).findByRole('button', {
+      name: /evaluate agent tool use/,
+      current: true,
+    });
+
+    await userEvent.keyboard('u');
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'PATCH',
+          path: 'feedItems/7/state',
+          json: { read: false },
+        }),
+      ),
+    );
+    await waitFor(() => expect(card).toHaveAttribute('data-read', 'false'));
+    expect(
+      await screen.findByText(enUS.feed.shortcuts.readOff),
+    ).toBeInTheDocument();
+  });
+
+  it('shows unread counts, lists only unread items and marks a view read', async () => {
+    const user = userEvent.setup();
+    await renderAt('/?view=discuss&platform=hn');
+    const rail = await screen.findByRole('navigation', {
+      name: enUS.feed.views.label,
+    });
+    expect(await within(rail).findByLabelText('5 unread')).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: enUS.feed.read.unreadOnly,
+        pressed: false,
+      }),
+    );
+    // The list and its counts filter alike.
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ view: 'discuss', unread: 'true' }),
+        }),
+      ),
+    );
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: 'feedItems/summary',
+        query: expect.objectContaining({ platform: 'hn', unread: 'true' }),
+      }),
+    );
+    expect(
+      screen.getByRole('button', {
+        name: enUS.feed.read.unreadOnly,
+        pressed: true,
+      }),
+    ).toBeInTheDocument();
+    // Counts are already unread counts: no second figure.
+    await waitFor(() =>
+      expect(within(rail).queryByLabelText(/unread/)).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: enUS.feed.read.markAllRead }),
+    );
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          path: 'feedItems/markRead',
+          json: { view: 'discuss', platform: 'hn' },
+        }),
+      ),
+    );
+    expect(await screen.findByText('Marked 5 as read')).toBeInTheDocument();
   });
 
   it('opens the detail from the URL and saves a mark', async () => {

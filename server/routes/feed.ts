@@ -37,6 +37,8 @@ import {
   IdParams,
   ListItemsQuery,
   ListRunsQuery,
+  MarkAllReadBody,
+  MarkAllReadSchema,
   SaveProfileBody,
   UpdateSourceBody,
   UpdateStateBody,
@@ -452,6 +454,32 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           ),
         }),
     );
+    items.post(
+      '/markRead',
+      describeRoute({
+        tags: ['Feed'],
+        summary: 'Mark everything a view lists under the filters as read',
+        description:
+          'Reaches the same items the list shows for the view, platform, topic, search and period.',
+        operationId: 'markFeedItemsRead',
+        responses: {
+          '200': dataResponse(MarkAllReadSchema),
+          '400': apiErrorResponse(400),
+          '401': errors['401'],
+          '500': errors['500'],
+        },
+      }),
+      apiValidator('json', MarkAllReadBody),
+      async (context) =>
+        context.json({
+          data: {
+            marked: await feed().markAllRead(
+              ownerOf(context),
+              context.req.valid('json'),
+            ),
+          },
+        }),
+    );
     items.get(
       '/:id',
       describeRoute({
@@ -473,7 +501,7 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       describeRoute({
         tags: ['Feed'],
         summary:
-          'Update my favourite, read-later, dismissal, feedback, notes or participation record',
+          'Update my read, favourite, read-later, dismissal, feedback, notes or participation record',
         description:
           'Feedback moves the weight of the words that matched the item and scores recent items again. A Hacker News or Reddit participation link is followed for new replies.',
         operationId: 'updateFeedItemState',

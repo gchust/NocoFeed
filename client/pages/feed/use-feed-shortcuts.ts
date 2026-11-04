@@ -6,6 +6,7 @@ export type ShortcutAction =
   | 'favorite'
   | 'later'
   | 'dismiss'
+  | 'read'
   | 'open'
   | 'close'
   | 'help';
@@ -16,6 +17,7 @@ const KEYS: Readonly<Record<string, ShortcutAction>> = {
   s: 'favorite',
   l: 'later',
   x: 'dismiss',
+  u: 'read',
   o: 'open',
   Escape: 'close',
   '?': 'help',
@@ -28,6 +30,7 @@ export const SHORTCUTS: readonly (readonly [string, ShortcutAction])[] = [
   ['s', 'favorite'],
   ['l', 'later'],
   ['x', 'dismiss'],
+  ['u', 'read'],
   ['o', 'open'],
   ['Esc', 'close'],
   ['?', 'help'],

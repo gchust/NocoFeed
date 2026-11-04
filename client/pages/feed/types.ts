@@ -30,7 +30,8 @@ export type FeedView = (typeof VIEWS)[number];
 /** How far back the list reaches by publication time; absent means any time. */
 export const PERIODS = ['day', 'week', 'month'] as const;
 export type FeedPeriod = (typeof PERIODS)[number];
-export const SORTS = ['priority', 'newest'] as const;
+/** `newest` is the default order; `priority` is chosen on purpose. */
+export const SORTS = ['newest', 'priority'] as const;
 export type FeedSort = (typeof SORTS)[number];
 export type ListView = Exclude<FeedView, 'digest'>;
 
@@ -173,6 +174,8 @@ export interface FeedListItem {
   readonly favorite: boolean;
   readonly later: boolean;
   readonly participated: boolean;
+  /** The person has opened the item or marked it read. */
+  readonly read: boolean;
   readonly newReplies: number;
 }
 
@@ -191,6 +194,7 @@ export interface ItemState {
   readonly participationUrl: string | null;
   readonly participationNote: string | null;
   readonly dismissed: boolean;
+  readonly read: boolean;
   readonly followUp: {
     readonly replies: number | null;
     readonly newReplies: number;
@@ -288,6 +292,8 @@ export interface FeedItem extends FeedListItem {
 }
 
 export interface FeedSummary extends Readonly<Record<ListView, number>> {
+  /** How many of each view's items are unread, under the same filters. */
+  readonly unread: Readonly<Record<ListView, number>>;
   readonly newReplies: number;
   readonly unhealthySources: number;
 }

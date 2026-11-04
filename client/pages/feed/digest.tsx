@@ -21,12 +21,15 @@ import type { FeedDigest, FeedListItem } from './types.js';
 export function DigestPanel({
   reloadCount,
   selectedId,
+  readOverrides,
   topicNames,
   onSelect,
   onRetry,
 }: {
   readonly reloadCount: number;
   readonly selectedId?: number;
+  /** Items read or marked unread since the digest loaded. */
+  readonly readOverrides?: ReadonlyMap<number, boolean>;
   readonly topicNames: ReadonlyMap<number, string>;
   readonly onSelect: (id: number) => void;
   readonly onRetry: () => void;
@@ -78,7 +81,7 @@ export function DigestPanel({
   const card = (item: FeedListItem): ReactNode => (
     <li key={item.id}>
       <FeedCard
-        item={item}
+        item={{ ...item, read: readOverrides?.get(item.id) ?? item.read }}
         language={i18n.language}
         topicName={item.topicId ? topicNames.get(item.topicId) : undefined}
         selected={item.id === selectedId}

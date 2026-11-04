@@ -12,6 +12,7 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611060001_feed_item_media.ts` (`feedItems.media`: images and video links, see "The post first" below).
   `202611070001_feed_time_window.ts` (`feedProfiles.maxAgeDays`, `feedItems.timelineAt`).
   `202611080001_feed_run_window.ts` (`feedRuns.windowFilter`/`windowScanned`: how the Collector applied the window).
+  `202611080002_feed_read_state.ts` (`feedItemStates.readAt`, see "Read state" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -39,6 +40,14 @@ the person's topics and experience, and the person keeps their own marks and not
 - **Triage.** `dismissed` hides an item from `all`/`discuss`/`learn` and their counts but keeps it in the personal views.
   The feed page has a compact density (remembered per browser) and single-key shortcuts (`use-feed-shortcuts.ts`) that
   never fire while typing or inside another dialog.
+- **Read state.** `feedItemStates.readAt` is when the person first read the item; null or no state row is unread.
+  Opening the detail sends `PATCH …/state { read: true }` once per opening (the page's `readOpening`, so a detail
+  remounted after "Mark unread" or the `u` shortcut does not read it again); reading again keeps the first time.
+  `unread=true` on `/feedItems` and `/feedItems/summary` goes through `feedQuery`, and the summary's `unread` object
+  counts each view's unread items under the same filters. `POST /feedItems/markRead` marks what one view lists under
+  the filters (`feedQuery` again), inserting state rows where none exist. Unread cards are bold with a dot
+  (`data-read`). The migration took items already saved, joined, dismissed, noted or judged as read; the rest start
+  unread.
 - **Follow-up.** A Hacker News or Reddit `participationUrl` starts following the thread for two weeks
   (`nextFollowUp`: hourly, then every 4 h, then every 12 h). The first check records the baseline; later increases are
   sent once as `followUpNew` and cleared with `followUpSeen`. Reddit refuses most servers, so its checks often fail
@@ -98,8 +107,10 @@ the person's topics and experience, and the person keeps their own marks and not
   to Preferences to widen the window. Unknown or absent values are null.
 - An item already stored (`ownerId`, `platform`, `externalId`) is never inserted or analysed again; only the run's new
   ids go to `analyzeItems`.
-- `feedItems.timelineAt` is `publishedAt`, else the collection time; every insert sets it. The feed's `sort=newest` and
-  `period` (`day`/`week`/`month`, also on `/feedItems/summary`) use it, because the query builder has no `COALESCE`.
+- `feedItems.timelineAt` is `publishedAt`, else the collection time; every insert sets it. The feed's `sort=newest`
+  (the default, in the API and on the page; `sort=priority` is asked for) and `period` (`day`/`week`/`month`, also on
+  `/feedItems/summary`) use it, because the query builder has no `COALESCE`. The digest picks by priority and shows its
+  picks newest first.
 - Tests: `tests/server/feed-time-window.test.ts`, `tests/database/feed-time-window-migration.test.ts`,
   `tests/database/feed-run-window-migration.test.ts`, `tests/client/runs-page.test.tsx`, the `since` and `window`
   cases in `feed-collector-client.test.ts`.
@@ -121,7 +132,7 @@ the person's topics and experience, and the person keeps their own marks and not
   unrelated and fails open; it does not count against `dailyLimit`. A **bare title** with something left to fetch gets the
   rules and `gate: awaitingMaterial`, and enriching it runs the analysis it was waiting for. The **full analysis** rates
   relevance (`score`) and worth (`quality`) apart: the server computes `quality` from the model's axes and caps it by
-  noise kind, and the feed sorts by `priority` (`priorityOf`). "Analyze again" bypasses both gates. Rule analyses have no
+  noise kind, and `sort=priority` and the digest's picks use `priority` (`priorityOf`). "Analyze again" bypasses both gates. Rule analyses have no
   quality and rank at `NEUTRAL_QUALITY`.
 - Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
 - Reddit refuses the JSON listing from most servers; the adapter falls back to the RSS feed and says so
@@ -160,8 +171,9 @@ runtime someone connects, which can open pages themselves. NocoFeed hands one ta
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
-and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, the post first: excerpt, cover, gallery,
-video, paragraphs). Text and media: `tests/server/feed-media-prefetch.test.ts`,
+and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, read state, the post first: excerpt,
+cover, gallery, video, paragraphs). Read state and the default order: `tests/server/feed-read-state.test.ts` and
+`tests/database/feed-read-state-migration.test.ts`. Text and media: `tests/server/feed-media-prefetch.test.ts`,
 `tests/database/feed-item-media-migration.test.ts` and the media case in `feed-collector-client.test.ts`. Runner agents:
 `tests/server/feed-runner-agent.test.ts` (hand-off, assembly, settling, fallbacks; an `ensureSystem` agent stands in
 for a reported one), `tests/database/feed-runner-agent-migration.test.ts` and `tests/client/preferences-page.test.tsx`.

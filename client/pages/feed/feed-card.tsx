@@ -49,6 +49,7 @@ function ComfortableCard({
       type='button'
       onClick={onSelect}
       data-item-id={item.id}
+      data-read={item.read ? 'true' : 'false'}
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full flex-col gap-2 rounded-xl border bg-card p-4 text-left transition-colors outline-none hover:border-primary/40 focus-visible:ring-3 focus-visible:ring-ring/50',
@@ -57,6 +58,7 @@ function ComfortableCard({
       )}
     >
       <span className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+        <UnreadDot read={item.read} />
         <PlatformBadge platform={item.platform} />
         <span className='max-w-[16rem] truncate'>
           {item.sourceLabel ?? '—'}
@@ -70,7 +72,12 @@ function ComfortableCard({
       {/* The post first: its title, the opening of its text and its picture; the analysis is one line under it. */}
       <span className='flex w-full items-start gap-3'>
         <span className='flex min-w-0 flex-1 flex-col gap-1'>
-          <span className='line-clamp-2 text-[0.95rem] leading-snug font-medium'>
+          <span
+            className={cn(
+              'line-clamp-2 text-[0.95rem] leading-snug',
+              item.read ? 'font-normal text-foreground/80' : 'font-semibold',
+            )}
+          >
             {item.title}
           </span>
           {item.excerpt ? (
@@ -124,6 +131,7 @@ function CompactRow({
       type='button'
       onClick={onSelect}
       data-item-id={item.id}
+      data-read={item.read ? 'true' : 'false'}
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50',
@@ -152,9 +160,13 @@ function CompactRow({
       <span
         className={cn(
           'min-w-0 flex-1 truncate',
-          selected ? 'font-medium text-foreground' : 'text-foreground',
+          item.read ? 'text-muted-foreground' : 'font-semibold text-foreground',
+          selected && 'text-foreground',
         )}
       >
+        {item.read ? null : (
+          <span className='sr-only'>{t('feed.read.unread')} </span>
+        )}
         {item.title}
       </span>
       <NewReplies count={item.newReplies} />
@@ -169,6 +181,18 @@ function CompactRow({
         {relativeTime(item.publishedAt ?? item.createdAt, language)}
       </time>
     </button>
+  );
+}
+
+/** Marks an item the person has not opened yet; read items show nothing. */
+function UnreadDot({ read }: { readonly read: boolean }): ReactElement | null {
+  const { t } = useTranslation();
+  if (read) return null;
+  return (
+    <span className='inline-flex items-center' title={t('feed.read.unread')}>
+      <span aria-hidden='true' className='size-2 rounded-full bg-primary' />
+      <span className='sr-only'>{t('feed.read.unread')}</span>
+    </span>
   );
 }
 

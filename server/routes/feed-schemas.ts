@@ -282,9 +282,14 @@ export const ListItemsQuery = z.object({
     description:
       'Only items published (or, when the date is unknown, collected) in the last day, week or month',
   }),
-  sort: z.enum(['priority', 'newest']).default('priority').meta({
+  unread: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true')
+    .meta({ description: 'true: only items I have not read' }),
+  sort: z.enum(['newest', 'priority']).default('newest').meta({
     description:
-      'priority: most worth reading first; newest: most recently published first',
+      'newest (default): most recently published first; priority: most worth reading first',
   }),
   pageSize: z.coerce.number().int().min(1).max(100).default(30),
   pageToken: z.string().max(64).optional(),
@@ -295,7 +300,25 @@ export const FeedSummaryQuery = ListItemsQuery.pick({
   topicId: true,
   q: true,
   period: true,
+  unread: true,
 });
+
+export const MarkAllReadBody = z.strictObject({
+  view: ListItemsQuery.shape.view,
+  platform: PLATFORM.optional(),
+  topicId: z.number().int().positive().optional(),
+  q: z.string().max(200).optional(),
+  period: ListItemsQuery.shape.period,
+});
+
+export const MarkAllReadSchema = z
+  .object({
+    marked: z
+      .number()
+      .int()
+      .meta({ description: 'How many unread items are now read' }),
+  })
+  .meta({ ref: 'FeedMarkAllRead' });
 
 export const FeedListItemSchema = z
   .object({
@@ -326,6 +349,9 @@ export const FeedListItemSchema = z
     favorite: z.boolean(),
     later: z.boolean(),
     participated: z.boolean(),
+    read: z
+      .boolean()
+      .meta({ description: 'I have opened the item or marked it read' }),
     newReplies: z.number().int(),
   })
   .meta({ ref: 'FeedListItem' });
@@ -346,6 +372,7 @@ export const FeedItemStateSchema = z
     participationUrl: z.string().nullable(),
     participationNote: z.string().nullable(),
     dismissed: z.boolean(),
+    read: z.boolean(),
     followUp: z
       .object({
         replies: z.number().int().nullable(),
@@ -482,6 +509,10 @@ export const UpdateStateBody = z.strictObject({
     .optional(),
   participationNote: z.string().max(5_000).nullable().optional(),
   dismissed: z.boolean().optional(),
+  read: z
+    .boolean()
+    .optional()
+    .meta({ description: 'Marks the item read (opening it does) or unread' }),
   followUpSeen: z
     .literal(true)
     .optional()
@@ -496,6 +527,18 @@ export const FeedSummarySchema = z
     saved: z.number().int(),
     later: z.number().int(),
     participated: z.number().int(),
+    unread: z
+      .object({
+        all: z.number().int(),
+        discuss: z.number().int(),
+        learn: z.number().int(),
+        saved: z.number().int(),
+        later: z.number().int(),
+        participated: z.number().int(),
+      })
+      .meta({
+        description: "How many of each view's items I have not read",
+      }),
     newReplies: z.number().int(),
     unhealthySources: z.number().int(),
   })

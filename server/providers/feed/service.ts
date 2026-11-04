@@ -59,6 +59,7 @@ export type FeedView =
   'all' | 'discuss' | 'learn' | 'saved' | 'later' | 'participated';
 /** How far back the feed list reaches, by when an item was published. */
 export type FeedPeriod = 'day' | 'week' | 'month';
+/** `newest` (publication time, newest first) is the default; `priority` puts what is most worth reading first. */
 export type FeedSort = 'priority' | 'newest';
 const PERIOD_DAYS: Record<FeedPeriod, number> = { day: 1, week: 7, month: 30 };
 
@@ -155,6 +156,8 @@ export interface ItemState {
   participationUrl: string | null;
   participationNote: string | null;
   dismissed: boolean;
+  /** The person has opened the item or marked it read. */
+  read: boolean;
   /** Present while the participation link is one NocoFeed can follow (Hacker News, Reddit). */
   followUp: FollowUp | null;
 }
@@ -232,6 +235,8 @@ export interface FeedListItem {
   favorite: boolean;
   later: boolean;
   participated: boolean;
+  /** The person has opened the item or marked it read. */
+  read: boolean;
   /** Replies to the person's post they have not seen yet. */
   newReplies: number;
 }
@@ -297,6 +302,8 @@ export interface FeedSummary {
   saved: number;
   later: number;
   participated: number;
+  /** How many of each view's items are unread, under the same filters. */
+  unread: Record<FeedView, number>;
   /** Items whose followed thread has replies the person has not seen. */
   newReplies: number;
   /** Subscriptions that keep failing or have gone quiet. */
@@ -448,6 +455,8 @@ const PREFETCH_STOPS = new Set([
   'unconfigured',
 ]);
 const EXCERPT_LENGTH = 280;
+/** Rows changed per statement by "Mark all as read", well under every database's bound-parameter limit. */
+const READ_BATCH = 200;
 const HOUR_MS = 3_600_000;
 
 /** Failed runs in a row before a subscription counts as failing. */
@@ -2442,6 +2451,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     participationUrl: (row?.participationUrl as string | null) ?? null,
     participationNote: (row?.participationNote as string | null) ?? null,
     dismissed: bool(row?.dismissed),
+    read: row?.readAt != null,
     followUp:
       row?.followUpSince == null
         ? null
@@ -2491,6 +2501,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     favorite: bool(state?.favorite),
     later: bool(state?.later),
     participated: bool(state?.participated),
+    read: state?.readAt != null,
     newReplies: Number(state?.followUpNew ?? 0),
   });
 
@@ -2508,6 +2519,8 @@ export function createFeedService(deps: FeedServiceDeps) {
       q?: string;
       since?: Date;
       period?: FeedPeriod;
+      /** Only items the person has not read. */
+      unread?: boolean;
     },
   ) {
     let builder = database
@@ -2546,6 +2559,8 @@ export function createFeedService(deps: FeedServiceDeps) {
       builder = builder.where((eb) =>
         eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
       );
+    // No state row, or one without `readAt`: the person has not read it.
+    if (query.unread) builder = builder.where('s.readAt', 'is', null);
     if (query.since) builder = builder.where('i.createdAt', '>=', query.since);
     // When it was published; when that is unknown, when it was collected.
     if (query.period)
@@ -2572,7 +2587,7 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   /**
    * One page of the feed: items with their current analysis and the person's state, filtered in SQL, sorted by
-   * value then recency (or by publication time alone), paged by offset behind an opaque token. Three queries
+   * publication time (the default) or by value then recency, paged by offset behind an opaque token. Three queries
    * regardless of the page size.
    */
   async function listItems(
@@ -2583,6 +2598,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       topicId?: number;
       q?: string;
       period?: FeedPeriod;
+      unread?: boolean;
       sort?: FeedSort;
       pageSize: number;
       pageToken?: string;
@@ -2597,7 +2613,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         )
       : 0;
     const ordered =
-      query.sort === 'newest'
+      query.sort !== 'priority'
         ? feedQuery(ownerId, query)
             // Publication time where known, else collection time; the id keeps equal times in a stable order.
             .select(['i.id as id', 'i.timelineAt as timelineAt'])
@@ -2691,29 +2707,35 @@ export function createFeedService(deps: FeedServiceDeps) {
       topicId?: number;
       q?: string;
       period?: FeedPeriod;
+      /** Count only unread items, as the list does under "Unread only". */
+      unread?: boolean;
     } = {},
   ): Promise<FeedSummary> {
-    const count = async (view: FeedView) => {
-      const [row] = await feedQuery(ownerId, { ...filters, view })
+    const count = async (view: FeedView, unread = filters.unread) => {
+      const [row] = await feedQuery(ownerId, { ...filters, view, unread })
         .select((eb) => [eb.fn.count('i.id').as('n')])
         .execute();
       return Number((row as Row | undefined)?.n ?? 0);
     };
-    const [all, discuss, learn, saved, later, participated, replies, sources] =
-      await Promise.all([
-        count('all'),
-        count('discuss'),
-        count('learn'),
-        count('saved'),
-        count('later'),
-        count('participated'),
-        // A followed thread counts wherever the item sits, as it did before the filters applied.
-        feedQuery(ownerId, filters)
-          .select((eb) => [eb.fn.count('i.id').as('n')])
-          .where('s.followUpNew', '>', 0)
-          .execute(),
-        listSources(ownerId),
-      ]);
+    const views = [
+      'all',
+      'discuss',
+      'learn',
+      'saved',
+      'later',
+      'participated',
+    ] as const;
+    const [counts, unreadCounts, replies, sources] = await Promise.all([
+      Promise.all(views.map((view) => count(view))),
+      Promise.all(views.map((view) => count(view, true))),
+      // A followed thread counts wherever the item sits, as it did before the filters applied.
+      feedQuery(ownerId, { ...filters, unread: undefined })
+        .select((eb) => [eb.fn.count('i.id').as('n')])
+        .where('s.followUpNew', '>', 0)
+        .execute(),
+      listSources(ownerId),
+    ]);
+    const [all, discuss, learn, saved, later, participated] = counts;
     return {
       all,
       discuss,
@@ -2721,6 +2743,9 @@ export function createFeedService(deps: FeedServiceDeps) {
       saved,
       later,
       participated,
+      unread: Object.fromEntries(
+        views.map((view, index) => [view, unreadCounts[index]]),
+      ) as FeedSummary['unread'],
       newReplies: Number((replies[0] as Row | undefined)?.n ?? 0),
       unhealthySources: sources.filter(
         (source) => source.active && source.health !== 'ok',
@@ -2755,6 +2780,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     ] as const) {
       if (input[key] !== undefined) values[key] = input[key];
     }
+    // Reading again keeps when it was first read; marking unread forgets it.
+    if (input.read !== undefined)
+      values.readAt = input.read ? (before?.readAt ?? new Date()) : null;
     if (input.participationUrl !== undefined) {
       const url = input.participationUrl?.trim() || null;
       values.participationUrl = url;
@@ -2796,6 +2824,62 @@ export function createFeedService(deps: FeedServiceDeps) {
       })) as Row | null,
     );
     return adjustment ? { ...state, adjustment } : state;
+  }
+
+  /**
+   * Marks every unread item one view lists under the given filters as read, the same items `listItems` would show
+   * (`feedQuery`), so "Mark all as read" never reaches past what the person sees. Answers how many changed.
+   */
+  async function markAllRead(
+    ownerId: string,
+    filters: {
+      view: FeedView;
+      platform?: string;
+      topicId?: number;
+      q?: string;
+      period?: FeedPeriod;
+    },
+  ): Promise<number> {
+    const rows = await feedQuery(ownerId, { ...filters, unread: true })
+      .select(['i.id as id', 's.id as stateId'])
+      .execute<Row>();
+    if (!rows.length) return 0;
+    const now = new Date();
+    const existing = rows
+      .filter((row) => row.stateId != null)
+      .map((row) => Number(row.stateId));
+    const missing = rows
+      .filter((row) => row.stateId == null)
+      .map((row) => Number(row.id));
+    for (let start = 0; start < existing.length; start += READ_BATCH) {
+      await database
+        .query()
+        .updateTable('feedItemStates')
+        .set({ readAt: now, updatedAt: now })
+        .where('ownerId', '=', ownerId)
+        .where('id', 'in', existing.slice(start, start + READ_BATCH))
+        .execute();
+    }
+    for (let start = 0; start < missing.length; start += READ_BATCH) {
+      await database
+        .query()
+        .insertInto('feedItemStates')
+        .values(
+          missing.slice(start, start + READ_BATCH).map((itemId) => ({
+            ownerId,
+            itemId,
+            favorite: false,
+            later: false,
+            participated: false,
+            dismissed: false,
+            followUpNew: 0,
+            readAt: now,
+            updatedAt: now,
+          })),
+        )
+        .execute();
+    }
+    return rows.length;
   }
 
   /**
@@ -2978,20 +3062,39 @@ export function createFeedService(deps: FeedServiceDeps) {
     return { model: verdictOf(draft), rules: verdictOf(rules) };
   }
 
-  /** The daily digest: the best discussions and the best learning item collected in the last 24 hours. */
+  /**
+   * The daily digest: the best discussions and the best learning item collected in the last 24 hours. Picked by
+   * priority, shown newest first like the rest of the feed.
+   */
   async function digest(
     ownerId: string,
     now = new Date(),
   ): Promise<FeedDigest> {
     const since = new Date(now.getTime() - 24 * HOUR_MS);
     const [discuss, learn] = await Promise.all([
-      listItems(ownerId, { view: 'discuss', pageSize: 3, since }),
-      listItems(ownerId, { view: 'learn', pageSize: 1, since }),
+      listItems(ownerId, {
+        view: 'discuss',
+        sort: 'priority',
+        pageSize: 3,
+        since,
+      }),
+      listItems(ownerId, {
+        view: 'learn',
+        sort: 'priority',
+        pageSize: 1,
+        since,
+      }),
     ]);
+    const newestFirst = (items: FeedListItem[]) =>
+      [...items].sort(
+        (a, b) =>
+          Date.parse(b.publishedAt ?? b.createdAt) -
+            Date.parse(a.publishedAt ?? a.createdAt) || b.id - a.id,
+      );
     return {
       since: since.toISOString(),
-      discuss: discuss.items,
-      learn: learn.items,
+      discuss: newestFirst(discuss.items),
+      learn: newestFirst(learn.items),
     };
   }
 
@@ -3174,6 +3277,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     listItems,
     getItem,
     updateState,
+    markAllRead,
     enrichItem,
     prefetchWaiting,
     reanalyzeItem,
