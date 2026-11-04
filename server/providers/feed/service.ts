@@ -4,6 +4,12 @@ import type { DatabaseManager } from '@nocobase/db';
 import type { FeedConfig } from '../../config/feed.js';
 import { followableUrl, type Adapters } from './adapters.js';
 import {
+  ANALYZE_TRIGGER,
+  FEED_ITEM_SUBJECT,
+  type AgentResult,
+  type AnalyzePayload,
+} from './agent-reader.js';
+import {
   analyzeWithRules,
   awaitingMaterial,
   blockedByPrefilter,
@@ -63,6 +69,8 @@ export interface Profile {
   digestHour: number;
   /** IANA time zone the digest hour is read in; the server's own when unset. */
   timeZone: string | null;
+  /** The runner agent "Analyze again" is handed to; null keeps the model gateway and the rules. */
+  readerAgentId: string | null;
 }
 
 export type SourceHealth = 'ok' | 'failing' | 'quiet';
@@ -183,7 +191,7 @@ export interface Analysis {
   steps: { title: string; detail: string }[];
   evidence: string | null;
   uncertainty: string | null;
-  engine: 'rules' | 'model';
+  engine: 'rules' | 'model' | 'agent';
   model: string | null;
   contentVersion: number;
   createdAt: string;
@@ -226,6 +234,15 @@ export interface FeedItemDetail extends FeedListItem {
   analysisStale: boolean;
   state: ItemState;
   enrichable: ('body' | 'comments' | 'transcript')[];
+  /** A runner agent is reading the item for a new analysis; null when none is. */
+  agentReading: AgentReading | null;
+}
+
+export interface AgentReading {
+  /** The `feedRuns` row waiting for it. */
+  runId: number;
+  agentId: string;
+  startedAt: string;
 }
 
 export interface Run {
@@ -476,6 +493,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       digestEnabled: row ? bool(row.digestEnabled) : true,
       digestHour: Number(row?.digestHour ?? 8),
       timeZone: (row?.timeZone as string | null) ?? null,
+      readerAgentId: (row?.readerAgentId as string | null) ?? null,
     };
   }
 
@@ -485,7 +503,12 @@ export function createFeedService(deps: FeedServiceDeps) {
       Profile,
       'interests' | 'expertise' | 'avoid' | 'dailyLimit' | 'keepLearning'
     > &
-      Partial<Pick<Profile, 'digestEnabled' | 'digestHour' | 'timeZone'>> & {
+      Partial<
+        Pick<
+          Profile,
+          'digestEnabled' | 'digestHour' | 'timeZone' | 'readerAgentId'
+        >
+      > & {
         locale?: Locale;
         resetLearning?: boolean;
       },
@@ -506,6 +529,9 @@ export function createFeedService(deps: FeedServiceDeps) {
         ? { digestHour: input.digestHour }
         : {}),
       ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
+      ...(input.readerAgentId !== undefined
+        ? { readerAgentId: input.readerAgentId?.trim() || null }
+        : {}),
       ...(input.resetLearning ? { termWeights: null } : {}),
       updatedAt: new Date(),
     };
@@ -1731,6 +1757,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     itemId: number,
   ): Promise<FeedItemDetail> {
     const row = await requireRow('feedItems', ownerId, itemId);
+    if (await handToAgent(ownerId, row)) return getItem(ownerId, itemId);
     const runId = await startRun({
       ownerId,
       itemId,
@@ -1758,6 +1785,230 @@ export function createFeedService(deps: FeedServiceDeps) {
       throw error;
     }
     return getItem(ownerId, itemId);
+  }
+
+  // Runner agents
+
+  /** The agent run still reading the item, if one is. */
+  async function readingAgent(
+    ownerId: string,
+    itemId: number,
+  ): Promise<AgentReading | null> {
+    const [row] = await database
+      .query()
+      .selectFrom('feedRuns')
+      .select(['id', 'agentResult', 'startedAt'])
+      .where('ownerId', '=', ownerId)
+      .where('itemId', '=', itemId)
+      .where('agentRunId', 'is not', null)
+      .where('status', 'in', ['running', 'settling'])
+      .orderBy('id', 'desc')
+      .limit(1)
+      .execute<Row>();
+    if (!row) return null;
+    const profile = await getProfile(ownerId);
+    return {
+      runId: Number(row.id),
+      agentId: profile.readerAgentId ?? '',
+      startedAt: iso(row.startedAt) ?? '',
+    };
+  }
+
+  /**
+   * Hands "Analyze again" to the person's runner agent, with the brief the model gateway would get. Answers false when
+   * there is no agent to hand it to, so the caller analyses as before: no agent chosen, the plugin missing, the agent
+   * disabled or removed, or the queue refusing the work. An item already being read is not queued twice.
+   */
+  async function handToAgent(ownerId: string, row: Row): Promise<boolean> {
+    const agents = deps.agents();
+    if (!agents) return false;
+    const profile = await getProfile(ownerId);
+    const agentId = profile.readerAgentId;
+    if (!agentId) return false;
+    const itemId = Number(row.id);
+    if (await readingAgent(ownerId, itemId)) return true;
+    try {
+      const agent = await agents.agents.findWorkable(agents.tx.read(), agentId);
+      if (!agent) {
+        deps.log('info', 'reader agent is not workable; analysing here', {
+          itemId,
+          agentId,
+        });
+        return false;
+      }
+      const sourceId = row.sourceId == null ? null : Number(row.sourceId);
+      const topics = await topicsFor(ownerId, sourceId);
+      const locale = localeFor(
+        profile.locale,
+        `${profile.interests}${text(row.title)}`,
+      );
+      const { system, prompt } = buildPrompt(
+        toAnalysisItem(row),
+        topics,
+        profile,
+        locale,
+      );
+      await agents.tx.run(async (tx) => {
+        const created = await tx.conn.repository('feedRuns').createOne({
+          values: {
+            ownerId,
+            itemId,
+            sourceId,
+            stage: 'analyze',
+            trigger: 'manual',
+            status: 'running',
+            scope: truncate(String(row.title), 300),
+            startedAt: new Date(),
+          },
+        } as never);
+        const feedRunId = Number((created as { record: Row }).record.id);
+        const payload: AnalyzePayload = {
+          trigger: ANALYZE_TRIGGER,
+          feedRunId,
+          itemId,
+          system,
+          prompt,
+        };
+        const result = await agents.runs.enqueue(
+          {
+            agentId,
+            subject: { kind: FEED_ITEM_SUBJECT, id: String(itemId) },
+            actorUserId: ownerId,
+            input: {
+              type: 'custom',
+              actor: { kind: 'system', id: 'nocofeed', name: 'NocoFeed' },
+              text: `Analyse "${truncate(String(row.title), 200)}" again.`,
+              payload,
+            },
+          },
+          tx,
+        );
+        // Nobody else answers for a person's own item, so the work is always queued, never a run request.
+        if (result.outcome === 'pending' || !result.runId)
+          throw new Error('agent run was not queued');
+        await tx.conn.repository('feedRuns').updateMany({
+          filter: { id: feedRunId },
+          values: { agentRunId: result.runId },
+        } as never);
+      });
+      return true;
+    } catch (error) {
+      deps.log('warn', 'could not hand the analysis to the agent', {
+        itemId,
+        agentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Settles the agent runs that ended: a readable answer becomes the item's analysis (engine `agent`); a failed,
+   * cancelled or unreadable one falls back to the model gateway and the rules, as "Analyze again" did before. Each row
+   * is claimed with a guarded update, so the hook after a run and the schedule never settle one twice.
+   */
+  async function settleAgentReads(): Promise<number> {
+    const rows = await database
+      .query()
+      .selectFrom('feedRuns')
+      .selectAll()
+      .where('agentRunId', 'is not', null)
+      .where('agentResult', 'is not', null)
+      .where('status', '=', 'running')
+      .orderBy('id')
+      .limit(50)
+      .execute<Row>();
+    let settled = 0;
+    for (const run of rows) {
+      const { updatedCount } = await repo('feedRuns').updateMany({
+        filter: { id: Number(run.id), status: 'running' },
+        values: { status: 'settling' },
+      } as never);
+      if (!updatedCount) continue;
+      const ownerId = String(run.ownerId);
+      const itemId = Number(run.itemId);
+      const result = json<AgentResult | null>(run.agentResult, null);
+      try {
+        const item = (await repo('feedItems').findOne({
+          filter: { ownerId, id: itemId },
+        })) as Row | null;
+        if (!item) {
+          await finishRun(Number(run.id), {
+            status: 'failed',
+            error: 'itemGone',
+          });
+          continue;
+        }
+        const draft =
+          result?.status === 'completed' && result.summary
+            ? await agentDraft(ownerId, item, result)
+            : null;
+        if (draft) {
+          await writeAnalysis(ownerId, item, draft);
+          await finishRun(Number(run.id), {
+            status: 'succeeded',
+            found: 1,
+            analyzed: 1,
+          });
+        } else {
+          const analyzed = await analyzeItems(
+            ownerId,
+            [itemId],
+            item.sourceId == null ? null : Number(item.sourceId),
+            { asked: true },
+          );
+          await finishRun(Number(run.id), {
+            status: 'fellBack',
+            found: 1,
+            analyzed,
+            error:
+              result?.status === 'completed'
+                ? 'agentAnswerUnreadable'
+                : result?.status === 'cancelled'
+                  ? 'agentCancelled'
+                  : 'agentFailed',
+          });
+        }
+        settled += 1;
+      } catch (error) {
+        await finishRun(Number(run.id), {
+          status: 'failed',
+          error: truncate(
+            error instanceof Error ? error.message : String(error),
+            2_000,
+          ),
+        });
+      }
+    }
+    return settled;
+  }
+
+  /** The agent's answer as an analysis, or null when it is not the JSON the brief asked for. */
+  async function agentDraft(
+    ownerId: string,
+    item: Row,
+    result: AgentResult,
+  ): Promise<AnalysisDraft | null> {
+    const [profile, topics] = await Promise.all([
+      getProfile(ownerId),
+      topicsFor(ownerId, item.sourceId == null ? null : Number(item.sourceId)),
+    ]);
+    const locale = localeFor(
+      profile.locale,
+      `${profile.interests}${text(item.title)}`,
+    );
+    try {
+      const draft = parseModelAnswer(
+        result.summary ?? '',
+        topics,
+        toAnalysisItem(item),
+        locale,
+        result.model ? `${result.agentId} (${result.model})` : result.agentId,
+      );
+      return { ...draft, engine: 'agent' };
+    } catch {
+      return null;
+    }
   }
 
   async function enrichItem(
@@ -1875,7 +2126,7 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   async function getItem(ownerId: string, id: number): Promise<FeedItemDetail> {
     const row = await requireRow('feedItems', ownerId, id);
-    const [analysisRow, stateRow, source] = await Promise.all([
+    const [analysisRow, stateRow, source, agentReading] = await Promise.all([
       repo('feedAnalyses').findOne({
         filter: { itemId: id, current: true },
       }) as Promise<Row | null>,
@@ -1887,6 +2138,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         : (repo('feedSources').findOne({
             filter: { ownerId, id: Number(row.sourceId) },
           }) as Promise<Row | null>),
+      readingAgent(ownerId, id),
     ]);
     const analysis = analysisRow ? toAnalysis(analysisRow) : null;
     const state = toState(stateRow);
@@ -1910,6 +2162,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         String(row.platform),
         source ? String(source.operation) : null,
       ),
+      agentReading,
     };
   }
 
@@ -2640,6 +2893,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     updateState,
     enrichItem,
     reanalyzeItem,
+    settleAgentReads,
     itemOwners,
     labelledCases,
     judgeCase,

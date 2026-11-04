@@ -37,6 +37,10 @@ export const FeedProfileSchema = z
     digestEnabled: z.boolean(),
     digestHour: z.number().int(),
     timeZone: z.string().nullable(),
+    readerAgentId: z.string().nullable().meta({
+      description:
+        'The runner agent "Analyze again" is handed to; null analyses with the model and the rules',
+    }),
   })
   .meta({ ref: 'FeedProfile' });
 
@@ -50,6 +54,10 @@ export const SaveProfileBody = z.strictObject({
   digestEnabled: z.boolean().optional(),
   digestHour: z.number().int().min(0).max(23).optional(),
   timeZone: z.string().max(64).nullable().optional(),
+  readerAgentId: z.string().max(200).nullable().optional().meta({
+    description:
+      'An enabled runner agent id (Agents plugin) to hand "Analyze again" to; null to stop',
+  }),
   resetLearning: z
     .boolean()
     .optional()
@@ -385,7 +393,7 @@ export const FeedItemSchema = FeedListItemSchema.extend({
       steps: z.array(z.object({ title: z.string(), detail: z.string() })),
       evidence: z.string().nullable(),
       uncertainty: z.string().nullable(),
-      engine: z.enum(['rules', 'model']),
+      engine: z.enum(['rules', 'model', 'agent']),
       model: z.string().nullable(),
       contentVersion: z.number().int(),
       createdAt: z.string(),
@@ -394,6 +402,17 @@ export const FeedItemSchema = FeedListItemSchema.extend({
   analysisStale: z.boolean(),
   state: FeedItemStateSchema,
   enrichable: z.array(PART),
+  agentReading: z
+    .object({
+      runId: z.number().int(),
+      agentId: z.string(),
+      startedAt: z.string(),
+    })
+    .nullable()
+    .meta({
+      description:
+        'A runner agent is reading the item for a new analysis; null when none is',
+    }),
 }).meta({ ref: 'FeedItem' });
 
 export const UpdateStateBody = z.strictObject({

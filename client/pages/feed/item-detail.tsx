@@ -172,7 +172,12 @@ export function ItemDetail({
       });
       replace(data);
       onChanged();
-      toaster.show({ type: 'success', title: t('feed.detail.analyzed') });
+      toaster.show({
+        type: 'success',
+        title: data.agentReading
+          ? t('feed.detail.handedToAgent')
+          : t('feed.detail.analyzed'),
+      });
     } catch (cause: unknown) {
       failed(cause);
     } finally {
@@ -384,7 +389,7 @@ export function ItemDetail({
             size='xs'
             variant='outline'
             className='ml-auto'
-            disabled={Boolean(busy)}
+            disabled={Boolean(busy) || Boolean(item.agentReading)}
             onClick={() => void analyze()}
           >
             {busy === 'analyze' ? (
@@ -395,6 +400,16 @@ export function ItemDetail({
             {t('feed.detail.reanalyze')}
           </Button>
         </div>
+        {item.agentReading ? (
+          <Alert>
+            <Spinner />
+            <AlertDescription>
+              {t('feed.detail.agentReading', {
+                time: relativeTime(item.agentReading.startedAt, i18n.language),
+              })}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {item.analysisStale ? (
           <Alert>
             <AlertTriangleIcon />
@@ -473,9 +488,11 @@ export function ItemDetail({
               </TextBlock>
             ) : null}
             <p className='text-xs text-muted-foreground'>
-              {analysis.engine === 'model'
-                ? t('feed.detail.byModel', { model: analysis.model ?? '—' })
-                : t('feed.detail.byRules')}
+              {analysis.engine === 'agent'
+                ? t('feed.detail.byAgent', { agent: analysis.model ?? '—' })
+                : analysis.engine === 'model'
+                  ? t('feed.detail.byModel', { model: analysis.model ?? '—' })
+                  : t('feed.detail.byRules')}
               {' · '}
               {relativeTime(analysis.createdAt, i18n.language)}
             </p>

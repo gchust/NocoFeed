@@ -95,7 +95,7 @@ Put a package your **server** code (`server/`, `database/`, `cli/`) imports in `
 
 ### Plugins
 
-**Read a plugin's Skill before building what it already does.** Building a permission system, a notification sender, or a job scheduler by hand when a registered plugin already provides one is the most expensive mistake available here. Register and update plugins with `pnpm nocobase plugin register` and `pnpm nocobase plugin update`; customize a plugin's page through its options, a source extension or `client/route-overrides.ts`, never by redeclaring its route. `.agents/skills/` is generated output; never edit a file there. See [plugins](.agents/skills/nocobase-app-development/references/plugins.md).
+**Read a plugin's Skill before building what it already does.** Building a permission system, a notification sender, or a job scheduler by hand when a registered plugin already provides one is the most expensive mistake available here. Register and update plugins with `pnpm nocobase plugin register` and `pnpm nocobase plugin update`; customize a plugin's page through its options or an explicitly registered route component override, never by redeclaring its route. `.agents/skills/` is generated output; never edit a file there. See [plugins](.agents/skills/nocobase-app-development/references/plugins.md).
 
 ### Running the application
 
@@ -132,7 +132,7 @@ Standard Repository writes require an operation key through the registered submi
 | [.agents/rules/components.md](.agents/rules/components.md)             | Adding or changing a component, a shadcn primitive, a UI Library item, or the visual design                  |
 | [.agents/rules/shell.md](.agents/rules/shell.md)                       | Changing layouts, the header, sidebar, breadcrumbs, the account menu or loading indicators                   |
 | [.agents/rules/build-and-deploy.md](.agents/rules/build-and-deploy.md) | Changing the build, packing a deployment, the Docker image, `CDN_BASE_URL`, or building for another platform |
-| [.agents/rules/feed.md](.agents/rules/feed.md)                         | Changing NocoFeed's collection, analysis, feed API or pages, or the Collector contract                       |
+| [.agents/rules/feed.md](.agents/rules/feed.md)                         | Changing NocoFeed's collection, analysis, runner agents, feed API or pages, or the Collector contract        |
 
 ## Visible and manageable role assignments
 

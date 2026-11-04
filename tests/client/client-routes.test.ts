@@ -87,6 +87,11 @@ describe('app client routes', () => {
         authorizedAs: 'settings:authorization.default-access',
       })),
       { name: 'models', authorizedAs: 'settings:agents.services' },
+      // The Agents plugin's administration of runner agents, each behind the plugin's own page grant.
+      { name: 'agents', authorizedAs: 'agents' },
+      { name: 'runtimes', authorizedAs: 'runtimes' },
+      { name: 'runtimes-connect', authorizedAs: 'runtimes' },
+      { name: 'usage', authorizedAs: 'usage' },
     ]);
   });
 
@@ -98,6 +103,9 @@ describe('app client routes', () => {
         '/settings/users',
         '/settings/roles',
         '/settings/models',
+        '/settings/agents',
+        '/settings/runtimes',
+        '/settings/usage',
       ]),
     );
     expect(new Set(paths).size).toBe(paths.length);

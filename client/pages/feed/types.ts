@@ -45,6 +45,8 @@ export interface Profile {
   readonly digestEnabled: boolean;
   readonly digestHour: number;
   readonly timeZone: string | null;
+  /** The runner agent "Analyze again" is handed to; null analyses with the model and the rules. */
+  readonly readerAgentId: string | null;
 }
 
 export interface Topic {
@@ -212,7 +214,7 @@ export interface Analysis {
   }[];
   readonly evidence: string | null;
   readonly uncertainty: string | null;
-  readonly engine: 'rules' | 'model';
+  readonly engine: 'rules' | 'model' | 'agent';
   readonly model: string | null;
   readonly contentVersion: number;
   readonly createdAt: string;
@@ -247,6 +249,12 @@ export interface FeedItem extends FeedListItem {
   readonly analysisStale: boolean;
   readonly state: ItemState;
   readonly enrichable: readonly EnrichPart[];
+  /** A runner agent is reading the item for a new analysis. */
+  readonly agentReading: {
+    readonly runId: number;
+    readonly agentId: string;
+    readonly startedAt: string;
+  } | null;
 }
 
 export interface FeedSummary extends Readonly<Record<ListView, number>> {
