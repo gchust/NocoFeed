@@ -8,6 +8,7 @@ import {
   AdapterError,
   type CollectRequest,
   type CollectResult,
+  type CollectWindow,
   type CollectedItem,
   type CommentEntry,
   type EnrichRequest,
@@ -949,6 +950,17 @@ interface CollectorResponse {
   cursor?: Record<string, unknown> | null;
   items?: CollectedItem[];
   item?: Omit<EnrichResult, 'status' | 'message'>;
+  window?: unknown;
+}
+
+/** The Collector's optional `window`, when it is one NocoFeed understands; anything else is as if it were absent. */
+export function collectWindowOf(value: unknown): CollectWindow | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { filter, scanned } = value as Record<string, unknown>;
+  if (filter !== 'platform' && filter !== 'local') return undefined;
+  return Number.isSafeInteger(scanned) && (scanned as number) >= 0
+    ? { filter, scanned: scanned as number }
+    : { filter };
 }
 
 function createCollectorClient(config: () => FeedConfig, http: Http) {
@@ -1017,11 +1029,16 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         request.knownIds.size > 0 &&
         items.length === listed.length &&
         (Boolean(response.truncated) || listed.length >= request.limit);
+      // Only meaningful for a request that had a window.
+      const applied = request.since
+        ? collectWindowOf(response.window)
+        : undefined;
       return {
         status: response.status ?? 'ok',
         message: response.message,
         truncated: fullPageOfNew,
         cursor: response.cursor ?? request.cursor,
+        ...(applied ? { window: applied } : {}),
         items: items.map((item) => ({
           ...item,
           url: webLink(item.url),

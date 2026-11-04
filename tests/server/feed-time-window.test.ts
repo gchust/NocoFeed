@@ -15,6 +15,7 @@ import {
 import type {
   CollectRequest,
   CollectResult,
+  CollectWindow,
   CollectedItem,
 } from '../../server/providers/feed/types.js';
 import { createStandaloneServer } from '../../server/standalone.js';
@@ -146,10 +147,15 @@ async function setUp(testApp: Parameters<typeof signIn>[0]) {
   const { data: source } = (await created.json()) as { data: { id: number } };
 
   let answer: CollectedItem[] = [];
+  let applied: CollectWindow | undefined;
   const requests: CollectRequest[] = [];
   const collect = vi.fn(async (request: CollectRequest) => {
     requests.push(request);
-    return { status: 'ok', items: answer } satisfies CollectResult;
+    return {
+      status: 'ok',
+      items: answer,
+      ...(applied ? { window: applied } : {}),
+    } satisfies CollectResult;
   });
   const service = createFeedService({
     database,
@@ -169,8 +175,9 @@ async function setUp(testApp: Parameters<typeof signIn>[0]) {
     notify: async () => true,
     log: () => undefined,
   });
-  const run = async (items: CollectedItem[]) => {
+  const run = async (items: CollectedItem[], window?: CollectWindow) => {
     answer = items;
+    applied = window;
     return service.runSource(admin.user.id, source.id, 'manual');
   };
   const stored = async () =>
@@ -287,4 +294,56 @@ test('the feed lists newest first and by publication period', async ({
   ).json()) as { data: { later: number } };
   expect(summary.data.later).toBe(2);
   expect((await admin.fetch('/feedItems?period=year')).status).toBe(400);
+});
+
+test('a run records whether the platform applied the time window', async ({
+  testApp,
+}) => {
+  const { admin, profile, run } = await setUp(testApp);
+  // A first run the platform could not narrow by date, with fewer items than the subscription asks for (20).
+  const first = await run([entry('a', ago(DAY))], {
+    filter: 'local',
+    scanned: 100,
+  });
+  expect(first).toMatchObject({
+    windowFilter: 'local',
+    windowScanned: 100,
+    windowShort: true,
+  });
+  // Later runs only look back to the last one, so few items there say nothing about the window.
+  const later = await run([entry('b', ago(1_000))], { filter: 'local' });
+  expect(later).toMatchObject({
+    windowFilter: 'local',
+    windowScanned: null,
+    windowShort: false,
+  });
+  const narrowed = await run([], { filter: 'platform' });
+  expect(narrowed).toMatchObject({
+    windowFilter: 'platform',
+    windowShort: false,
+  });
+  // A Collector that does not say, and a run without a window, record nothing.
+  expect(await run([])).toMatchObject({
+    windowFilter: null,
+    windowScanned: null,
+  });
+  expect((await profile(0)).status).toBe(200);
+  expect(await run([], { filter: 'local', scanned: 30 })).toMatchObject({
+    windowFilter: null,
+    windowScanned: null,
+  });
+
+  const listed = (await (
+    await admin.fetch('/feedRuns?pageSize=10')
+  ).json()) as {
+    data: { windowFilter: string | null; windowShort: boolean }[];
+  };
+  expect(listed.data.map((entry) => entry.windowFilter)).toEqual([
+    null,
+    null,
+    'platform',
+    'local',
+    'local',
+  ]);
+  expect(listed.data.at(-1)?.windowShort).toBe(true);
 });

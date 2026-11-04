@@ -45,6 +45,7 @@ import { truncate } from './text.js';
 import { createHash } from 'node:crypto';
 import type {
   CollectResult,
+  CollectWindow,
   CommentEntry,
   EnrichResult,
   ItemCoverage,
@@ -277,6 +278,14 @@ export interface Run {
   analyzed: number;
   coverage: string | null;
   error: string | null;
+  /** How the time window was applied (see `CollectWindow`); null when the run had none or nobody said. */
+  windowFilter: CollectWindow['filter'] | null;
+  windowScanned: number | null;
+  /**
+   * A first run that could only filter by date locally found fewer items than the subscription asks for: widening
+   * "only collect what was published within" is what would bring more.
+   */
+  windowShort: boolean;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -1397,6 +1406,11 @@ export function createFeedService(deps: FeedServiceDeps) {
             found: result.items.length,
             inserted: ids.length,
             coverage: runCoverage,
+            windowFilter: window && result.window ? result.window.filter : null,
+            windowScanned:
+              window && result.window?.scanned != null
+                ? result.window.scanned
+                : null,
             error: succeeded
               ? null
               : truncate(result.message ?? result.status, 2_000),
@@ -1505,6 +1519,10 @@ export function createFeedService(deps: FeedServiceDeps) {
   const toRun = (row: Row, sources: Map<number, Source>): Run => {
     const source =
       row.sourceId != null ? sources.get(Number(row.sourceId)) : undefined;
+    const windowFilter =
+      row.windowFilter === 'platform' || row.windowFilter === 'local'
+        ? row.windowFilter
+        : null;
     return {
       id: Number(row.id),
       sourceId: row.sourceId == null ? null : Number(row.sourceId),
@@ -1520,6 +1538,14 @@ export function createFeedService(deps: FeedServiceDeps) {
       analyzed: Number(row.analyzed ?? 0),
       coverage: (row.coverage as string | null) ?? null,
       error: (row.error as string | null) ?? null,
+      windowFilter,
+      windowScanned:
+        row.windowScanned == null ? null : Number(row.windowScanned),
+      windowShort:
+        windowFilter === 'local' &&
+        row.coverage === 'baseline' &&
+        source != null &&
+        Number(row.found ?? 0) < source.candidateLimit,
       startedAt: iso(row.startedAt) ?? '',
       finishedAt: iso(row.finishedAt),
     };

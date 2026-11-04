@@ -88,6 +88,12 @@ Answer:
   full, so more may lie behind it; not when the list reached past `since`, which means the window was covered. NocoFeed drops ids it
   already stores and marks a run `partial` when the page was full (`truncated`, or as many items as `limit`) and no
   stored item was reached, so it never claims completeness it does not have.
+- `window` (optional, only for a request with `since`) says how the window was applied: `{ "filter": "platform" }`
+  when the platform's own date sort or filter did it, `{ "filter": "local", "scanned": 100 }` when it could not and
+  the Collector read `scanned` results (for instance a most-popular-first list, read deeper than `limit`) and kept
+  those published inside the window, still newest first. NocoFeed records it on the run (`feedRuns.windowFilter`,
+  `windowScanned`) and shows it in the run history; when a first run filtered locally found fewer items than asked for,
+  it suggests widening the window. A Collector that omits it changes nothing.
 - Answer HTTP `401`/`403` only for a wrong token; NocoFeed reports that as `unconfigured`/`collectorUnauthorized`, not as
   a platform sign-in. A platform that needs signing in is `200` with `needsLogin`.
 - Text targets are checked against `targetLength` in `server/providers/feed/catalog.ts` before a subscription is saved;

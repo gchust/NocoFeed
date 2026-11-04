@@ -617,6 +617,14 @@ const zhCN: AppResource = {
       partial: '被截断：可能漏掉了部分内容',
       single: '重新读取单条跟踪内容',
     },
+    window: {
+      platform: '平台已按发布时间筛选',
+      local: '平台不能按发布时间搜索，按发布时间在本地过滤',
+      localScanned:
+        '平台不能按发布时间搜索：读了 {{count}} 条热门结果，按发布时间留下窗口内的',
+      short: '时间范围内的内容比想要的少。',
+      widen: '放宽「只采集多久内发布的内容」',
+    },
   },
   preferences: {
     title: '兴趣与能力',

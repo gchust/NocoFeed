@@ -659,6 +659,15 @@ const enUS = {
       partial: 'Cut off: some items may have been missed',
       single: 'One tracked item re-read',
     },
+    window: {
+      platform: 'The platform filtered by publication date',
+      local:
+        'The platform cannot search by date; filtered by publication date here',
+      localScanned:
+        'The platform cannot search by date: read {{count}} popular results and kept those inside the time window',
+      short: 'Fewer items inside the time window than wanted.',
+      widen: 'Widen "Collect items from"',
+    },
   },
   preferences: {
     title: 'Interests & skills',
