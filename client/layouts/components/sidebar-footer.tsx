@@ -12,8 +12,9 @@ import {
 } from '#components/ui/tooltip';
 
 /**
- * The application's sidebar footer: the NocoBase slogan's two lines, then the template's name and its version, each
- * on its own line. In icon mode only the shield remains, and a tooltip carries the same text.
+ * The application's sidebar footer: the slogan's two lines, then the template's name and its version, each on its
+ * own line. NocoFeed's locale files replace the template's NocoBase slogan (`shell.*`) with its own, which has no
+ * `<brand>` link; the link below stays for a slogan that names one. In icon mode only the shield remains, and a tooltip carries the same text.
  */
 export function AppSidebarFooter(): ReactElement {
   const { t } = useTranslation();
