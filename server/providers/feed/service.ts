@@ -17,11 +17,14 @@ import {
   buildPrompt,
   hasOnlyTitle,
   limitedToTitle,
+  LOW_QUALITY,
   needsPrefilter,
   parsePrefilterAnswer,
   localeFor,
   matchTopics,
   parseModelAnswer,
+  priorityOf,
+  qualityOf,
   TERM_WEIGHT_MAX,
   TERM_WEIGHT_MIN,
   type AnalysisDraft,
@@ -32,6 +35,7 @@ import {
   type Locale,
   type NoiseKind,
   type QualityDetail,
+  type Verdict,
 } from './analyzer.js';
 import type { GoldCase } from './evaluation.js';
 import {
@@ -3107,6 +3111,59 @@ export function createFeedService(deps: FeedServiceDeps) {
     return count;
   }
 
+  /**
+   * Applies the current worth rules to analyses already stored: quality is recomputed from the model's axes (so a
+   * changed noise cap counts), priority follows, and what now falls below `LOW_QUALITY` is hidden. Only hides, never
+   * shows: a model may have ignored an item for its relevance. Spends no model budget; `dryRun` changes nothing.
+   */
+  async function reapplyWorth(
+    options: { dryRun?: boolean } = {},
+  ): Promise<{ checked: number; requalified: number; hidden: string[] }> {
+    const rows = await database
+      .query()
+      .selectFrom('feedAnalyses as a')
+      .innerJoin('feedItems as i', 'i.id', 'a.itemId')
+      .select([
+        'a.id',
+        'a.verdict',
+        'a.score',
+        'a.quality',
+        'a.qualityDetail',
+        'a.priority',
+        'i.title',
+      ])
+      .where('a.current', '=', true)
+      .where('a.engine', '=', 'model')
+      .where('a.qualityDetail', 'is not', null)
+      .execute<Row>();
+    let requalified = 0;
+    const hidden: string[] = [];
+    for (const row of rows) {
+      const detail = json<QualityDetail | null>(row.qualityDetail, null);
+      if (!detail) continue;
+      const quality = qualityOf(detail);
+      const priority = priorityOf(Number(row.score), quality);
+      const verdict =
+        quality < LOW_QUALITY ? 'ignore' : (text(row.verdict) as Verdict);
+      if (
+        quality === Number(row.quality) &&
+        priority === Number(row.priority) &&
+        verdict === row.verdict
+      )
+        continue;
+      requalified += 1;
+      if (verdict !== row.verdict) hidden.push(text(row.title));
+      if (options.dryRun) continue;
+      await database
+        .query()
+        .updateTable('feedAnalyses')
+        .set({ quality, priority, verdict })
+        .where('id', '=', Number(row.id))
+        .execute();
+    }
+    return { checked: rows.length, requalified, hidden };
+  }
+
   /** Everyone with items, for commands that act on one person's feed. */
   async function itemOwners(): Promise<string[]> {
     const rows = await database
@@ -3401,6 +3458,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     settleAgentReads,
     itemOwners,
     labelledCases,
+    reapplyWorth,
     judgeCase,
     summary,
     digest,

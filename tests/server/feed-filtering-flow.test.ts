@@ -187,7 +187,7 @@ async function setUp(
     .execute<Record<string, unknown>>();
   const row = (externalId: string) =>
     items.find((item) => item.externalId === `${run}-${externalId}`)!;
-  return { service, ownerId, generate, row };
+  return { service, ownerId, generate, row, database };
 }
 
 const callsAbout = (
@@ -222,14 +222,55 @@ test('spends the model only on what could belong, and ranks by worth', async ({
   expect(row('bare').verdict).not.toBe('discuss');
 
   expect(row('solid')).toMatchObject({ engine: 'model', verdict: 'discuss' });
-  expect(row('advert')).toMatchObject({ quality: 30, verdict: 'learn' });
+  // Selling is capped below the bar, so it is hidden however relevant.
+  expect(row('advert')).toMatchObject({ quality: 20, verdict: 'ignore' });
 
   const { items } = await service.listItems(ownerId, {
     view: 'all',
+    sort: 'priority',
     pageSize: 10,
   } as never);
   expect(items[0]?.title).toBe('Postgres backups restored in minutes');
   expect(items[0]?.quality).toBe(80);
+});
+
+test('stored analyses take on the current worth rules without asking the model', async ({
+  testApp,
+}) => {
+  const { generate, row, service, database } = await setUp(testApp);
+  const advert = Number(row('advert').id);
+  // As the older, looser rules left it: capped at 30 and still shown.
+  await database
+    .query()
+    .updateTable('feedAnalyses')
+    .set({ quality: 30, priority: 0, verdict: 'learn' })
+    .where('itemId', '=', advert)
+    .where('current', '=', true)
+    .execute();
+  const current = () =>
+    database
+      .query()
+      .selectFrom('feedAnalyses')
+      .select(['quality', 'verdict'])
+      .where('itemId', '=', advert)
+      .where('current', '=', true)
+      .executeTakeFirst<Record<string, unknown>>();
+  const calls = generate.mock.calls.length;
+
+  const preview = await service.reapplyWorth({ dryRun: true });
+  expect(preview.hidden).toContain('Postgres backups course, half price');
+  expect(await current()).toMatchObject({ quality: 30, verdict: 'learn' });
+
+  const applied = await service.reapplyWorth();
+  expect(applied.hidden).toContain('Postgres backups course, half price');
+  expect(await current()).toMatchObject({ quality: 20, verdict: 'ignore' });
+  // Solid content stays shown, and nothing was asked of the model.
+  expect(applied.hidden).not.toContain('Postgres backups restored in minutes');
+  expect(generate.mock.calls.length).toBe(calls);
+  // Settled: a second pass has nothing left to change.
+  expect((await service.reapplyWorth()).hidden).not.toContain(
+    'Postgres backups course, half price',
+  );
 });
 
 test('fetching material runs the analysis a bare title was waiting for', async ({

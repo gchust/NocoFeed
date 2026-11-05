@@ -92,7 +92,7 @@ export function mediaLine(media: readonly MediaEntry[] | null | undefined) {
 }
 
 export const RULES_VERSION = 'rules-4';
-export const PROMPT_VERSION = 'prompt-5';
+export const PROMPT_VERSION = 'prompt-6';
 export const PREFILTER_VERSION = 'prefilter-1';
 
 export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
@@ -139,22 +139,26 @@ const QUALITY_WEIGHTS: Readonly<
 };
 
 /**
- * Noise is capped by the server, so a model that likes an advert still cannot rank it. Every cap stays above
- * `LOW_QUALITY`: one label, which models apply freely, lowers an item but does not hide it; only low axes do that.
+ * Noise is capped by the server, so a model that likes an advert still cannot rank it. Selling, announcing what cannot
+ * be checked yet and claiming without showing are capped below `LOW_QUALITY` and so hidden: attention is the scarce
+ * thing, and none of them has shown it anything. A roundup or a routine release can still carry a fact, so they only rank low.
  */
 const NOISE_CAPS: Readonly<Record<NoiseKind, number>> = {
   none: 100,
-  promo: 30,
-  teaser: 30,
-  hype: 35,
+  promo: 20,
+  teaser: 20,
+  hype: 25,
   roundup: 40,
   routine: 40,
 };
 
 /** Quality assumed where no model judged it, so rule analyses neither lead nor trail model ones for that reason alone. */
 export const NEUTRAL_QUALITY = 50;
-/** Below this, content is not recommended however well it matches. */
-export const LOW_QUALITY = 25;
+/**
+ * Below this, content is hidden however well it matches. Worth has to be shown by the material: what cannot be told
+ * to be useful counts as not useful, so a thin item is hidden rather than ranked low.
+ */
+export const LOW_QUALITY = 35;
 /** Below this keyword score the rules saw no connection, so the item is worth asking the prefilter about. */
 const PREFILTER_BELOW = 25;
 
@@ -816,7 +820,8 @@ export function buildPrompt(
     'If comments were not obtained, never say a question is unanswered.',
     '"score" is relevance to this person only. Rate the worth of the content separately in "quality": a relevant advert is relevant and worthless.',
     'Judge quality from the MATERIAL alone. A famous name, long text, jargon or many numbers earn nothing by themselves; a short post with a clear new fact can rate high.',
-    'Noise: "promo" only when the main purpose is to sell, recruit or sign people up, such as adverts, paid courses and giveaways; a talk or case study explaining how something was built is not promo even if it names a vendor; "routine" for minor versions, ordinary fixes and platform listings; "roundup" for digests of many events with no focus; "hype" for "faster, stronger, amazing" without data, method or wider availability; "teaser" for announcements with nothing yet to verify; otherwise "none". Thin material is not noise: say so in "uncertainty" and rate only what is there.',
+    'The burden of proof is on the material. Rate each quality axis only for what the MATERIAL itself shows; never credit what it might contain, what the link might lead to or what a product might do. When you cannot tell whether something is useful, it is not: give "usefulness" and "evidence" 3 or less.',
+    'Noise: "promo" when the main purpose is to sell, recruit or sign people up, such as adverts, paid courses and giveaways, and also when it mainly introduces the author\'s own product, tool or service and asks people to try it, free or not ("Show HN", launches, "I built X"), without a method, results or lessons the reader could use without adopting it; a talk or case study explaining how something was built is not promo even if it names a vendor; "routine" for minor versions, ordinary fixes and platform listings; "roundup" for digests of many events with no focus; "hype" for "faster, stronger, amazing" without data, method or wider availability; "teaser" for announcements with nothing yet to verify; otherwise "none". Thin material is not noise: say so in "uncertainty" and rate the axes low.',
     'Keep "verdict", "interestLevel", "experienceLevel" and the "quality" labels exactly as listed in English; only free text follows the language above.',
     `Answer with one JSON object only, no markdown, written in ${language}.`,
   ].join('\n');
@@ -990,12 +995,9 @@ export function parseModelAnswer(
     : 'none';
   let verdict = pick('verdict', VERDICTS);
   // The server applies these so that the two judgements cannot contradict each other on the card.
-  // Low worth hides an item only when its substance was read; judged from a blurb, it just ranks low.
-  const substanceRead = Boolean(
-    item.body?.trim() || item.transcript?.length || item.comments?.length,
-  );
-  if (quality !== null && quality < LOW_QUALITY && substanceRead)
-    verdict = 'ignore';
+  // Low worth hides an item whatever was read: a blurb that does not show worth has not earned attention. A bare
+  // title with more to fetch never reaches here; it waits for material (`awaitingMaterial`).
+  if (quality !== null && quality < LOW_QUALITY) verdict = 'ignore';
   else if (
     verdict === 'discuss' &&
     qualityDetail &&
