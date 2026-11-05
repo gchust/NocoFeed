@@ -163,6 +163,12 @@ the person's topics and experience, and the person keeps their own marks and not
   relevance (`score`) and worth (`quality`) apart: the server computes `quality` from the model's axes and caps it by
   noise kind, and `sort=priority` and the digest's picks use `priority` (`priorityOf`). "Analyze again" bypasses both gates. Rule analyses have no
   quality and rank at `NEUTRAL_QUALITY`.
+- **Unproven is worthless.** Worth has to be shown by the material: the prompt tells the model that what it cannot tell
+  to be useful is not, and a launch of the author's own product (free or not, "Show HN") without a method or results
+  is `promo`. `promo`, `teaser` and `hype` are capped below `LOW_QUALITY` (35), so they are hidden; `roundup` and
+  `routine` only rank low. Low worth hides an item whether the body was read or only a blurb. After changing a cap or
+  the threshold, run `feed reapply-worth` (`--dry-run` first): it recomputes stored quality from the model's axes and
+  only ever hides, calling no model.
 - Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
 - **Publication times.** `publishedAt` is null when the platform gave none; `timelineAt` then holds the collection time
   so the item can still be placed, and the feed labels it "collected …" — never as the publication time.

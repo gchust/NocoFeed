@@ -4,6 +4,7 @@ import {
   analyzeWithRules,
   awaitingMaterial,
   blockedByPrefilter,
+  buildPrompt,
   hasOnlyTitle,
   limitedToTitle,
   LOW_QUALITY,
@@ -78,7 +79,7 @@ describe('quality', () => {
   });
 
   it('caps noise however high the axes', () => {
-    expect(qualityOf({ ...axes, noise: 'promo' })).toBe(30);
+    expect(qualityOf({ ...axes, noise: 'promo' })).toBe(20);
     expect(qualityOf({ ...axes, noise: 'roundup' })).toBe(40);
   });
 
@@ -128,9 +129,11 @@ describe('quality', () => {
         'en-US',
         'm',
       );
-    expect(parse({ ...axes, noise: 'hype' }).verdict).toBe('learn');
-    // One label lowers an item but does not hide it; only low axes do.
-    expect(parse({ ...axes, noise: 'promo' }).verdict).toBe('learn');
+    expect(parse({ ...axes, noise: 'roundup' }).verdict).toBe('learn');
+    // Selling, teasing and claiming without showing have shown nothing worth attention.
+    expect(parse({ ...axes, noise: 'promo' }).verdict).toBe('ignore');
+    expect(parse({ ...axes, noise: 'teaser' }).verdict).toBe('ignore');
+    expect(parse({ ...axes, noise: 'hype' }).verdict).toBe('ignore');
     const worthless = parse({
       ...axes,
       substance: 1,
@@ -152,7 +155,7 @@ describe('low worth', () => {
     usefulness: 1,
   };
 
-  it('does not hide what was judged from a blurb, only ranks it low', () => {
+  it('hides what a blurb does not show to be worth reading: unproven counts as worthless', () => {
     const draft = parseModelAnswer(
       answer({ verdict: 'learn', quality: low }),
       topics,
@@ -160,8 +163,39 @@ describe('low worth', () => {
       'en-US',
       'm',
     );
-    expect(draft.verdict).toBe('learn');
+    expect(draft.verdict).toBe('ignore');
     expect(draft.priority).toBeLessThan(priorityOf(80, null));
+  });
+
+  it('hides a free launch rated as thin as the one that prompted this', () => {
+    // "Show HN: Mooring": a free tool asking for feedback, with no method, results or evidence.
+    const draft = parseModelAnswer(
+      answer({
+        verdict: 'learn',
+        quality: {
+          contentType: 'release',
+          substance: 3,
+          novelty: 4,
+          evidence: 2,
+          usefulness: 3,
+          noise: 'none',
+        },
+      }),
+      topics,
+      item({ body: 'We built a tool and would love feedback.' }),
+      'en-US',
+      'm',
+    );
+    expect(draft.quality).toBe(30);
+    expect(draft.verdict).toBe('ignore');
+  });
+
+  it('asks the model to treat what it cannot show useful as not useful', () => {
+    const { system } = buildPrompt(item(), topics, profile, 'en-US');
+    expect(system).toContain(
+      'When you cannot tell whether something is useful, it is not',
+    );
+    expect(system).toContain('Show HN');
   });
 });
 
