@@ -79,9 +79,14 @@ function ComfortableCard({
               item.read ? 'font-normal text-foreground/80' : 'font-semibold',
             )}
           >
-            {item.title}
+            {item.brief?.title ?? item.title}
           </span>
-          {item.excerpt ? (
+          {/* The model's gist first: what the post says, in the reading language; its own opening otherwise. */}
+          {item.brief?.gist ? (
+            <span className='line-clamp-3 text-sm leading-6 text-muted-foreground'>
+              {item.brief.gist}
+            </span>
+          ) : item.excerpt ? (
             <span className='line-clamp-3 text-sm leading-6 whitespace-pre-line text-muted-foreground'>
               {item.excerpt}
             </span>
@@ -168,7 +173,7 @@ function CompactRow({
         {item.read ? null : (
           <span className='sr-only'>{t('feed.read.unread')} </span>
         )}
-        {item.title}
+        {item.brief?.title ?? item.title}
       </span>
       <NewReplies count={item.newReplies} />
       <StateIcons item={item} />

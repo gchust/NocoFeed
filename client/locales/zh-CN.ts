@@ -333,6 +333,20 @@ const zhCN: AppResource = {
       clear: '清除筛选',
       addSource: '添加订阅源',
     },
+    brief: {
+      heading: 'AI 摘要',
+      writing: '正在生成摘要…',
+      none: '还没有摘要。配置好 AI 模型后会自动生成。',
+      stale: '内容已更新，摘要基于之前的版本。',
+      write: '生成摘要',
+      rewrite: '重新生成',
+      failed: '摘要生成失败：没有可用的 AI 模型，或模型没有给出有效回答。',
+      translate: '翻译全文',
+      translateAgain: '重新翻译全文',
+      translateFailed: '翻译失败：没有可用的 AI 模型，或模型没有给出回答。',
+      showOriginal: '显示原文',
+      showTranslation: '显示译文',
+    },
     detail: {
       label: '内容详情',
       placeholder: '选择一条内容，查看推荐理由和行动建议。',
@@ -821,6 +835,23 @@ const zhCN: AppResource = {
       digestHour: '推送时间',
       readerAgentId: '“重新分析”使用的 Runner 智能体',
       maxAgeDays: '只采集多久内发布的内容',
+      readingLanguage: '阅读语言',
+    },
+    reading: {
+      interface: '跟随界面语言',
+      languages: {
+        original: '保持原文语言（不翻译）',
+        'zh-CN': '简体中文',
+        'zh-TW': '繁體中文',
+        en: 'English',
+        ja: '日本語',
+        ko: '한국어',
+        es: 'Español',
+        fr: 'Français',
+        de: 'Deutsch',
+        pt: 'Português',
+        ru: 'Русский',
+      },
     },
     maxAge: {
       day: '最近 24 小时',
@@ -854,6 +885,8 @@ const zhCN: AppResource = {
         'Runner 智能体会自己打开原文和讨论区，包括本服务器抓取不到的页面。未选择或它无法完成时，仍由模型和规则分析。',
       readerAgentIdEmpty:
         '还没有启用的 Runner 智能体。管理员可在 系统设置 → 运行环境 和 智能体 中连接运行环境并启用智能体。',
+      readingLanguage:
+        'AI 摘要和翻译使用的语言。信息流里的内容会由 AI 模型自动生成摘要，外文标题一并译成这种语言；全文可在详情里按需翻译。自动摘要和分析分别计入每日模型调用上限。',
     },
     learned: {
       title: '从你的反馈中学到的',

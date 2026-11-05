@@ -560,6 +560,40 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         return context.json({ data });
       },
     );
+    items.post(
+      '/:id/brief',
+      describeRoute({
+        tags: ['Feed'],
+        summary:
+          'Write the brief of one item again, in my reading language, with the configured model',
+        operationId: 'briefFeedItem',
+        responses: { '200': dataResponse(FeedItemSchema), ...errors },
+      }),
+      apiValidator('param', IdParams),
+      async (context) => {
+        const data = await guard(() =>
+          feed().briefItem(ownerOf(context), context.req.valid('param').id),
+        );
+        return context.json({ data });
+      },
+    );
+    items.post(
+      '/:id/translate',
+      describeRoute({
+        tags: ['Feed'],
+        summary:
+          "Translate one item's full text into my reading language with the configured model",
+        operationId: 'translateFeedItem',
+        responses: { '200': dataResponse(FeedItemSchema), ...errors },
+      }),
+      apiValidator('param', IdParams),
+      async (context) => {
+        const data = await guard(() =>
+          feed().translateItem(ownerOf(context), context.req.valid('param').id),
+        );
+        return context.json({ data });
+      },
+    );
     router.route('/feedItems', items);
 
     const digest = section();

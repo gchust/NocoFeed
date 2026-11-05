@@ -49,6 +49,10 @@ test('every feed route requires a session', async ({ request }) => {
       )
     ).status,
   ).toBe(401);
+  for (const path of ['/feedItems/1/brief', '/feedItems/1/translate']) {
+    const response = await request(path, json('POST'));
+    expect({ path, status: response.status }).toEqual({ path, status: 401 });
+  }
 });
 
 test('a person manages their own topics, subscriptions and profile', async ({
@@ -69,8 +73,48 @@ test('a person manages their own topics, subscriptions and profile', async ({
   );
   expect(profile.status).toBe(200);
   await expect(profile.json()).resolves.toMatchObject({
-    data: { dailyLimit: 10, locale: 'en-US', configured: true },
+    data: {
+      dailyLimit: 10,
+      locale: 'en-US',
+      configured: true,
+      // Briefs follow the interface language until one is chosen.
+      readingLanguage: null,
+    },
   });
+  const reading = {
+    interests: 'LLM agents, self-hosting',
+    expertise: 'TypeScript and PostgreSQL backends',
+    avoid: 'crypto',
+    dailyLimit: 10,
+    keepLearning: true,
+  };
+  const chosen = await admin.fetch(
+    '/feedProfile',
+    json('PUT', { ...reading, readingLanguage: 'ja' }),
+  );
+  await expect(chosen.json()).resolves.toMatchObject({
+    data: { readingLanguage: 'ja' },
+  });
+  expect(
+    (
+      await admin.fetch(
+        '/feedProfile',
+        json('PUT', { ...reading, readingLanguage: 'klingon' }),
+      )
+    ).status,
+  ).toBe(400);
+  // Leaving it out keeps the choice; null goes back to following the interface.
+  await expect(
+    (await admin.fetch('/feedProfile', json('PUT', reading))).json(),
+  ).resolves.toMatchObject({ data: { readingLanguage: 'ja' } });
+  await expect(
+    (
+      await admin.fetch(
+        '/feedProfile',
+        json('PUT', { ...reading, readingLanguage: null }),
+      )
+    ).json(),
+  ).resolves.toMatchObject({ data: { readingLanguage: null } });
 
   // A subscription is validated against the platform catalogue, and creating it fetches nothing yet.
   const source = await admin.fetch(
@@ -155,6 +199,12 @@ test('a person manages their own topics, subscriptions and profile', async ({
   expect(page.meta.nextPageToken ?? null).toBeNull();
   expect((await admin.fetch('/feedItems?view=unknown')).status).toBe(400);
   expect((await admin.fetch('/feedItems/123456')).status).toBe(404);
+  expect(
+    (await admin.fetch('/feedItems/123456/brief', json('POST'))).status,
+  ).toBe(404);
+  expect(
+    (await admin.fetch('/feedItems/123456/translate', json('POST'))).status,
+  ).toBe(404);
 });
 
 test("another person neither sees nor changes someone else's data", async ({

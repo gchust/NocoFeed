@@ -113,6 +113,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         await feed.prefetchWaiting();
         // Exact publication times for items whose list gave none or only "3 weeks ago" (YouTube search).
         await feed.resolvePublishedTimes();
+        // Briefs in the person's reading language for what the feed shows, a few per tick.
+        await feed.briefPending();
       },
     });
     await this.executor.addJob({

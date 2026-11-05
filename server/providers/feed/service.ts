@@ -37,6 +37,18 @@ import {
   type QualityDetail,
   type Verdict,
 } from './analyzer.js';
+import {
+  BRIEF_TOKENS,
+  buildBriefPrompt,
+  buildTranslationPrompt,
+  cleanMarkdown,
+  gistOf,
+  parseBriefAnswer,
+  readingLanguageOf,
+  translatableText,
+  TRANSLATION_TOKENS,
+  type ReadingLanguage,
+} from './brief.js';
 import type { GoldCase } from './evaluation.js';
 import {
   CATALOG,
@@ -86,6 +98,8 @@ export interface Profile {
   readerAgentId: string | null;
   /** Collection keeps items published within this many days; 0 keeps everything. */
   maxAgeDays: number;
+  /** The language briefs and translations are written in; `original` keeps each item's; null follows the interface. */
+  readingLanguage: ReadingLanguage | null;
 }
 
 export type SourceHealth = 'ok' | 'failing' | 'quiet';
@@ -246,9 +260,36 @@ export interface FeedListItem {
   read: boolean;
   /** Replies to the person's post they have not seen yet. */
   newReplies: number;
+  /** The model's brief in the reading language; null until one is written. */
+  brief: ListBrief | null;
 }
 
-export interface FeedItemDetail extends FeedListItem {
+export interface ListBrief {
+  language: ReadingLanguage;
+  /** The title in the reading language; null when it already is in it. */
+  title: string | null;
+  /** The brief's first paragraph as plain text, for the card. */
+  gist: string;
+  /** Written from an earlier version of the item. */
+  stale: boolean;
+}
+
+export interface ItemBrief extends ListBrief {
+  sourceLanguage: string | null;
+  /** Markdown; images are the item's own, as `media:N` (1-based). */
+  brief: string;
+  /** The full text translated, when it was asked for; null otherwise. */
+  body: string | null;
+  /** The translation was made from an earlier version of the item. */
+  bodyStale: boolean;
+  model: string | null;
+  createdAt: string;
+}
+
+export interface FeedItemDetail extends Omit<FeedListItem, 'brief'> {
+  /** The language a brief or translation of this item is written in. */
+  readingLanguage: ReadingLanguage;
+  brief: ItemBrief | null;
   externalId: string;
   author: string | null;
   body: string | null;
@@ -468,6 +509,9 @@ const PREFETCH_STOPS = new Set([
  */
 const PUBLISHED_PLATFORMS = ['youtube'];
 const PUBLISHED_PER_TICK = 5;
+/** Briefs written per tick, for shown items collected within this window. */
+const BRIEF_PER_TICK = 5;
+const BRIEF_WINDOW_MS = 3 * 24 * 60 * 60_000;
 const PUBLISHED_BUDGET_MS = 60_000;
 const PUBLISHED_WINDOW_MS = 30 * 24 * 60 * 60_000;
 const PUBLISHED_RECHECK_MS = 24 * 60 * 60_000;
@@ -612,6 +656,8 @@ export function createFeedService(deps: FeedServiceDeps) {
       timeZone: (row?.timeZone as string | null) ?? null,
       readerAgentId: (row?.readerAgentId as string | null) ?? null,
       maxAgeDays: Number(row?.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS),
+      readingLanguage:
+        (row?.readingLanguage as ReadingLanguage | null | undefined) ?? null,
     };
   }
 
@@ -629,6 +675,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           | 'timeZone'
           | 'readerAgentId'
           | 'maxAgeDays'
+          | 'readingLanguage'
         >
       > & {
         locale?: Locale;
@@ -656,6 +703,9 @@ export function createFeedService(deps: FeedServiceDeps) {
         : {}),
       ...(input.maxAgeDays !== undefined
         ? { maxAgeDays: input.maxAgeDays }
+        : {}),
+      ...(input.readingLanguage !== undefined
+        ? { readingLanguage: input.readingLanguage }
         : {}),
       ...(input.resetLearning ? { termWeights: null } : {}),
       updatedAt: new Date(),
@@ -2495,26 +2545,269 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   // Items
 
+  // Briefs and translations
+
+  /**
+   * The model a brief or translation uses: the same default chat model as the analysis. Scheduled briefs count against
+   * `dailyLimit` on their own (briefs written today); what the person asks for on one item does not.
+   */
+  async function briefModel(
+    ownerId: string,
+    profile: Profile,
+    counted: boolean,
+  ): Promise<{ modelService: string; model: string } | null> {
+    const agents = deps.agents();
+    if (!agents) return null;
+    let ref: { modelService: string; model: string } | null;
+    try {
+      ref = (await agents.models.gateway.catalog('chat')).defaultModel ?? null;
+    } catch {
+      ref = null;
+    }
+    if (!ref || !counted) return ref;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const [usage] = await database
+      .query()
+      .selectFrom('feedBriefs')
+      .select((eb) => [eb.fn.count('id').as('used')])
+      .where('ownerId', '=', ownerId)
+      .where('updatedAt', '>=', startOfDay)
+      .execute();
+    return Number((usage as Row | undefined)?.used ?? 0) >= profile.dailyLimit
+      ? null
+      : ref;
+  }
+
+  async function saveBrief(
+    ownerId: string,
+    row: Row,
+    language: ReadingLanguage,
+    values: Row,
+  ): Promise<void> {
+    const now = new Date();
+    await repo('feedBriefs').upsertOne({
+      filter: { ownerId, itemId: Number(row.id), language },
+      create: {
+        ownerId,
+        itemId: Number(row.id),
+        language,
+        createdAt: now,
+        updatedAt: now,
+        ...values,
+      },
+      update: { ...values, updatedAt: now },
+    } as never);
+  }
+
+  /** Writes the item's brief in the reading language. Answers false, having changed nothing, when no model could. */
+  async function writeBrief(
+    ownerId: string,
+    row: Row,
+    profile: Profile,
+    counted: boolean,
+  ): Promise<boolean> {
+    const ref = await briefModel(ownerId, profile, counted);
+    if (!ref) return false;
+    const language = readingLanguageOf(profile.readingLanguage, profile.locale);
+    const item = toAnalysisItem(row);
+    const { system, prompt } = buildBriefPrompt(item, language);
+    const ask = async () =>
+      (
+        await deps.agents()!.models.gateway.generate({
+          model: ref,
+          system,
+          prompt,
+          maxOutputTokens: BRIEF_TOKENS,
+          source: 'nocofeed.brief',
+          signal: AbortSignal.timeout(90_000),
+        })
+      ).text;
+    try {
+      let draft;
+      try {
+        draft = parseBriefAnswer(await ask(), item, language);
+      } catch {
+        // A cut-off or malformed answer is common enough that one more try is cheaper than no brief.
+        draft = parseBriefAnswer(await ask(), item, language);
+      }
+      await saveBrief(ownerId, row, language, {
+        contentVersion: Number(row.contentVersion ?? 1),
+        sourceLanguage: draft.sourceLanguage,
+        title: draft.title,
+        brief: draft.brief,
+        model: `${ref.modelService}/${ref.model}`,
+      });
+      return true;
+    } catch (error) {
+      deps.log('warn', 'feed brief failed', {
+        itemId: Number(row.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /** Writes (or rewrites) one item's brief because the person asked; does not count against the daily limit. */
+  async function briefItem(
+    ownerId: string,
+    id: number,
+  ): Promise<FeedItemDetail> {
+    const row = await requireRow('feedItems', ownerId, id);
+    const profile = await getProfile(ownerId);
+    if (!(await writeBrief(ownerId, row, profile, false)))
+      throw new FeedError('unavailable', 'briefFailed');
+    return getItem(ownerId, id);
+  }
+
+  /** Translates the item's full text into the reading language, because the person asked. */
+  async function translateItem(
+    ownerId: string,
+    id: number,
+  ): Promise<FeedItemDetail> {
+    const row = await requireRow('feedItems', ownerId, id);
+    const profile = await getProfile(ownerId);
+    const language = readingLanguageOf(profile.readingLanguage, profile.locale);
+    if (language === 'original')
+      throw new FeedError('invalid', 'noReadingLanguage');
+    const item = toAnalysisItem(row);
+    if (!translatableText(item))
+      throw new FeedError('invalid', 'nothingToTranslate');
+    const ref = await briefModel(ownerId, profile, false);
+    if (!ref) throw new FeedError('unavailable', 'noModel');
+    // A translation lives beside a brief; write the brief first when there is none in this language yet.
+    const existing = (await repo('feedBriefs').findOne({
+      filter: { ownerId, itemId: id, language },
+    })) as Row | null;
+    if (!existing && !(await writeBrief(ownerId, row, profile, false)))
+      throw new FeedError('unavailable', 'briefFailed');
+    const { system, prompt } = buildTranslationPrompt(item, language);
+    let text: string;
+    try {
+      text = (
+        await deps.agents()!.models.gateway.generate({
+          model: ref,
+          system,
+          prompt,
+          maxOutputTokens: TRANSLATION_TOKENS,
+          source: 'nocofeed.translation',
+          signal: AbortSignal.timeout(180_000),
+        })
+      ).text;
+    } catch (error) {
+      deps.log('warn', 'feed translation failed', {
+        itemId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new FeedError('unavailable', 'translationFailed');
+    }
+    const body = cleanMarkdown(text, 0);
+    if (!body) throw new FeedError('unavailable', 'translationFailed');
+    await repo('feedBriefs').updateOne({
+      filter: { ownerId, itemId: id, language },
+      values: {
+        body,
+        bodyVersion: Number(row.contentVersion ?? 1),
+        updatedAt: new Date(),
+      },
+    } as never);
+    return getItem(ownerId, id);
+  }
+
+  /**
+   * Writes briefs for recently collected items the feed shows, best first, a few per tick: those without one in the
+   * person's reading language, or with one written from an earlier version. A bare title waiting for its text waits
+   * here too. Stops for a person when the model is missing or their daily limit is reached.
+   */
+  async function briefPending({
+    limit = BRIEF_PER_TICK,
+    now = new Date(),
+  }: { limit?: number; now?: Date } = {}): Promise<number> {
+    let written = 0;
+    for (const ownerId of await itemOwners()) {
+      if (written >= limit) break;
+      const profile = await getProfile(ownerId);
+      const language = readingLanguageOf(
+        profile.readingLanguage,
+        profile.locale,
+      );
+      const rows = await database
+        .query()
+        .selectFrom('feedItems as i')
+        .innerJoin('feedAnalyses as a', (join) =>
+          join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
+        )
+        .leftJoin('feedBriefs as b', (join) =>
+          join
+            .onRef('b.itemId', '=', 'i.id')
+            .on('b.ownerId', '=', ownerId)
+            .on('b.language', '=', language),
+        )
+        .leftJoin('feedItemStates as s', (join) =>
+          join.onRef('s.itemId', '=', 'i.id').on('s.ownerId', '=', ownerId),
+        )
+        .selectAll('i')
+        .where('i.ownerId', '=', ownerId)
+        .where('a.verdict', 'in', ['discuss', 'learn'])
+        .where((eb) =>
+          eb.or([
+            eb('a.gate', 'is', null),
+            eb('a.gate', '!=', 'awaitingMaterial'),
+          ]),
+        )
+        .where((eb) =>
+          eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
+        )
+        .where('i.createdAt', '>=', new Date(now.getTime() - BRIEF_WINDOW_MS))
+        .where((eb) =>
+          eb.or([
+            eb('b.id', 'is', null),
+            eb('b.contentVersion', '<', eb.ref('i.contentVersion')),
+          ]),
+        )
+        .orderBy('a.priority', 'desc')
+        .orderBy('i.id', 'desc')
+        .limit(limit - written)
+        .execute<Row>();
+      for (const row of rows) {
+        if (!(await writeBrief(ownerId, row, profile, true))) break;
+        written += 1;
+      }
+    }
+    return written;
+  }
+
   async function getItem(ownerId: string, id: number): Promise<FeedItemDetail> {
     const row = await requireRow('feedItems', ownerId, id);
-    const [analysisRow, stateRow, source, agentReading] = await Promise.all([
-      repo('feedAnalyses').findOne({
-        filter: { itemId: id, current: true },
-      }) as Promise<Row | null>,
-      repo('feedItemStates').findOne({
-        filter: { ownerId, itemId: id },
-      }) as Promise<Row | null>,
-      row.sourceId == null
-        ? Promise.resolve(null)
-        : (repo('feedSources').findOne({
-            filter: { ownerId, id: Number(row.sourceId) },
-          }) as Promise<Row | null>),
-      readingAgent(ownerId, id),
-    ]);
+    const profile = await getProfile(ownerId);
+    const readingLanguage = readingLanguageOf(
+      profile.readingLanguage,
+      profile.locale,
+    );
+    const [analysisRow, stateRow, source, agentReading, briefRow] =
+      await Promise.all([
+        repo('feedAnalyses').findOne({
+          filter: { itemId: id, current: true },
+        }) as Promise<Row | null>,
+        repo('feedItemStates').findOne({
+          filter: { ownerId, itemId: id },
+        }) as Promise<Row | null>,
+        row.sourceId == null
+          ? Promise.resolve(null)
+          : (repo('feedSources').findOne({
+              filter: { ownerId, id: Number(row.sourceId) },
+            }) as Promise<Row | null>),
+        readingAgent(ownerId, id),
+        repo('feedBriefs').findOne({
+          filter: { ownerId, itemId: id, language: readingLanguage },
+        }) as Promise<Row | null>,
+      ]);
     const analysis = analysisRow ? toAnalysis(analysisRow) : null;
     const state = toState(stateRow);
     return {
       ...toListItem(row, analysisRow, stateRow),
+      readingLanguage,
+      brief: toItemBrief(row, briefRow),
       externalId: String(row.externalId),
       author: (row.author as string | null) ?? null,
       body: (row.body as string | null) ?? null,
@@ -2591,10 +2884,38 @@ export function createFeedService(deps: FeedServiceDeps) {
     return text ? truncate(text, EXCERPT_LENGTH) : null;
   };
 
+  const toListBrief = (row: Row, brief: Row | null): ListBrief | null =>
+    brief
+      ? {
+          language: brief.language as ReadingLanguage,
+          title: (brief.title as string | null) ?? null,
+          gist: gistOf(text(brief.brief)),
+          stale:
+            Number(brief.contentVersion ?? 1) < Number(row.contentVersion ?? 1),
+        }
+      : null;
+
+  const toItemBrief = (row: Row, brief: Row | null): ItemBrief | null => {
+    const list = toListBrief(row, brief);
+    if (!list || !brief) return null;
+    return {
+      ...list,
+      sourceLanguage: (brief.sourceLanguage as string | null) ?? null,
+      brief: text(brief.brief),
+      body: (brief.body as string | null) ?? null,
+      bodyStale:
+        brief.body != null &&
+        Number(brief.bodyVersion ?? 0) < Number(row.contentVersion ?? 1),
+      model: (brief.model as string | null) ?? null,
+      createdAt: iso(brief.updatedAt ?? brief.createdAt) ?? '',
+    };
+  };
+
   const toListItem = (
     row: Row,
     analysis: Row | null,
     state: Row | null,
+    brief: Row | null = null,
   ): FeedListItem => ({
     id: Number(row.id),
     platform: row.platform as Platform,
@@ -2622,6 +2943,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     participated: bool(state?.participated),
     read: state?.readAt != null,
     newReplies: Number(state?.followUpNew ?? 0),
+    brief: toListBrief(row, brief),
   });
 
   /**
@@ -2748,8 +3070,13 @@ export function createFeedService(deps: FeedServiceDeps) {
       .execute<Row>();
     const ids = page.slice(0, query.pageSize).map((row) => Number(row.id));
     if (!ids.length) return { items: [] };
+    const profile = await getProfile(ownerId);
+    const readingLanguage = readingLanguageOf(
+      profile.readingLanguage,
+      profile.locale,
+    );
 
-    const [items, analyses, states] = (await Promise.all([
+    const [items, analyses, states, briefs] = (await Promise.all([
       database
         .query()
         .selectFrom('feedItems')
@@ -2765,6 +3092,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           'publishedAt',
           'publishedApproximate',
           'createdAt',
+          'contentVersion',
         ])
         .where('ownerId', '=', ownerId)
         .where('id', 'in', ids)
@@ -2793,7 +3121,16 @@ export function createFeedService(deps: FeedServiceDeps) {
         .where('ownerId', '=', ownerId)
         .where('itemId', 'in', ids)
         .execute(),
-    ])) as [Row[], Row[], Row[]];
+      database
+        .query()
+        .selectFrom('feedBriefs')
+        .select(['itemId', 'language', 'title', 'brief', 'contentVersion'])
+        .where('ownerId', '=', ownerId)
+        .where('itemId', 'in', ids)
+        .where('language', '=', readingLanguage)
+        .execute(),
+    ])) as [Row[], Row[], Row[], Row[]];
+    const briefBy = new Map(briefs.map((row) => [Number(row.itemId), row]));
     const byId = new Map(items.map((row) => [Number(row.id), row]));
     const analysisBy = new Map(
       analyses.map((row) => [Number(row.itemId), row]),
@@ -2807,6 +3144,7 @@ export function createFeedService(deps: FeedServiceDeps) {
             byId.get(id)!,
             analysisBy.get(id) ?? null,
             stateBy.get(id) ?? null,
+            briefBy.get(id) ?? null,
           ),
         ),
       nextPageToken:
@@ -3458,6 +3796,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     settleAgentReads,
     itemOwners,
     labelledCases,
+    briefItem,
+    translateItem,
+    briefPending,
     reapplyWorth,
     judgeCase,
     summary,

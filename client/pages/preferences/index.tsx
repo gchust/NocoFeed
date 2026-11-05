@@ -54,7 +54,11 @@ import { Textarea } from '#components/ui/textarea';
 
 import { requestProblem } from '../feed/format.js';
 import { LoadProblem } from '../feed/parts.js';
-import type { Catalog, Profile } from '../feed/types.js';
+import {
+  READING_LANGUAGES,
+  type Catalog,
+  type Profile,
+} from '../feed/types.js';
 
 const FORM_ID = 'feed-preferences-form';
 
@@ -135,6 +139,8 @@ function ModelStatus({ catalog }: { readonly catalog: Catalog }): ReactElement {
 
 /** The select's value for "no runner agent": Analyze again stays with the model and the rules. */
 const NO_AGENT = 'none';
+/** The select's value for "follow the interface language" (stored as null). */
+const FOLLOW_INTERFACE = 'interface';
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 /** The time windows offered for collection, in days; 0 keeps everything. */
@@ -271,6 +277,7 @@ function PreferencesForm({
         digestHour: z.number().int().min(0).max(23),
         readerAgentId: z.string(),
         maxAgeDays: z.number().int().min(0).max(365),
+        readingLanguage: z.string(),
       }),
     [t],
   );
@@ -328,8 +335,16 @@ function PreferencesForm({
       digestHour: profile.digestHour,
       readerAgentId: profile.readerAgentId ?? NO_AGENT,
       maxAgeDays: profile.maxAgeDays,
+      readingLanguage: profile.readingLanguage ?? FOLLOW_INTERFACE,
     },
   });
+  const languageItems = [
+    { value: FOLLOW_INTERFACE, label: t('preferences.reading.interface') },
+    ...READING_LANGUAGES.map((language) => ({
+      value: language,
+      label: t(`preferences.reading.languages.${language}`),
+    })),
+  ];
 
   const validatedSubmit = form.handleSubmit(async (values) => {
     try {
@@ -342,6 +357,10 @@ function PreferencesForm({
           ...values,
           readerAgentId:
             values.readerAgentId === NO_AGENT ? null : values.readerAgentId,
+          readingLanguage:
+            values.readingLanguage === FOLLOW_INTERFACE
+              ? null
+              : values.readingLanguage,
           locale: locale === 'zh-CN' ? 'zh-CN' : 'en-US',
           timeZone: browserZone,
         },
@@ -356,6 +375,7 @@ function PreferencesForm({
         digestHour: data.digestHour,
         readerAgentId: data.readerAgentId ?? NO_AGENT,
         maxAgeDays: data.maxAgeDays,
+        readingLanguage: data.readingLanguage ?? FOLLOW_INTERFACE,
       });
       toaster.show({
         type: 'success',
@@ -598,6 +618,43 @@ function PreferencesForm({
                 )}
               />
             ) : null}
+            <Controller
+              control={form.control}
+              name='readingLanguage'
+              render={({ field }) => (
+                <Field className='max-w-md'>
+                  <FieldLabel htmlFor={`${FORM_ID}-readingLanguage`}>
+                    {t('preferences.fields.readingLanguage')}
+                  </FieldLabel>
+                  <Select
+                    items={languageItems}
+                    value={field.value}
+                    onValueChange={(value) =>
+                      field.onChange(String(value ?? FOLLOW_INTERFACE))
+                    }
+                  >
+                    <SelectTrigger
+                      id={`${FORM_ID}-readingLanguage`}
+                      className='w-full'
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {languageItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    {t('preferences.hints.readingLanguage')}
+                  </FieldDescription>
+                </Field>
+              )}
+            />
             <Controller
               control={form.control}
               name='readerAgentId'

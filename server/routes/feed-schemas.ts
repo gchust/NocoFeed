@@ -14,6 +14,24 @@ const GATE = z.enum(['prefilter', 'awaitingMaterial']);
 const MODE = z.enum(['both', 'participate', 'learn']);
 const LOCALE = z.enum(['zh-CN', 'en-US']);
 const PART = z.enum(['body', 'comments', 'transcript']);
+const READING_LANGUAGE = z
+  .enum([
+    'original',
+    'zh-CN',
+    'zh-TW',
+    'en',
+    'ja',
+    'ko',
+    'es',
+    'fr',
+    'de',
+    'pt',
+    'ru',
+  ])
+  .meta({
+    description:
+      "Language briefs and translations are written in; original keeps the item's own",
+  });
 
 export const IdParams = z.object({
   id: z.coerce.number().int().positive(),
@@ -45,6 +63,10 @@ export const FeedProfileSchema = z
       description:
         'Collection keeps items published within this many days; 0 keeps everything',
     }),
+    readingLanguage: READING_LANGUAGE.nullable().meta({
+      description:
+        'The language briefs and translations are written in; null follows the interface language',
+    }),
   })
   .meta({ ref: 'FeedProfile' });
 
@@ -69,6 +91,10 @@ export const SaveProfileBody = z.strictObject({
   maxAgeDays: z.number().int().min(0).max(365).optional().meta({
     description:
       'Keep collected items published within this many days; 0 keeps everything',
+  }),
+  readingLanguage: READING_LANGUAGE.nullable().optional().meta({
+    description:
+      'The language briefs and translations are written in; null follows the interface language',
   }),
 });
 
@@ -320,6 +346,19 @@ export const MarkAllReadSchema = z
   })
   .meta({ ref: 'FeedMarkAllRead' });
 
+const ListBriefSchema = z.object({
+  language: READING_LANGUAGE,
+  title: z.string().nullable().meta({
+    description: 'The title in the reading language; null when it already is',
+  }),
+  gist: z.string().meta({
+    description: "The brief's first paragraph as plain text",
+  }),
+  stale: z.boolean().meta({
+    description: 'Written from an earlier version of the item',
+  }),
+});
+
 export const FeedListItemSchema = z
   .object({
     id: z.number().int(),
@@ -353,6 +392,10 @@ export const FeedListItemSchema = z
         "The first image or a video's cover, a link on the platform's CDN",
     }),
     video: z.boolean().meta({ description: 'The post is a video' }),
+    brief: ListBriefSchema.nullable().meta({
+      description:
+        "The model's brief in the reading language; null until one is written",
+    }),
     favorite: z.boolean(),
     later: z.boolean(),
     participated: z.boolean(),
@@ -410,6 +453,20 @@ export const FeedStateChangeSchema = FeedItemStateSchema.extend({
 }).meta({ ref: 'FeedStateChange' });
 
 export const FeedItemSchema = FeedListItemSchema.extend({
+  readingLanguage: READING_LANGUAGE,
+  brief: ListBriefSchema.extend({
+    sourceLanguage: z.string().nullable(),
+    brief: z.string().meta({
+      description:
+        "Markdown without HTML; images are the item's own media as media:N (1-based)",
+    }),
+    body: z.string().nullable().meta({
+      description: 'The full text translated, once asked for; null otherwise',
+    }),
+    bodyStale: z.boolean(),
+    model: z.string().nullable(),
+    createdAt: z.string(),
+  }).nullable(),
   externalId: z.string(),
   author: z.string().nullable(),
   body: z.string().nullable(),
