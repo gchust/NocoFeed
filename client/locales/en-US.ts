@@ -353,6 +353,22 @@ const enUS = {
       clear: 'Clear filters',
       addSource: 'Add a subscription',
     },
+    brief: {
+      heading: 'AI brief',
+      writing: 'Writing the brief…',
+      none: 'No brief yet. One is written automatically once an AI model is set up.',
+      stale: 'The item has changed since this brief was written.',
+      write: 'Write brief',
+      rewrite: 'Write again',
+      failed:
+        'No brief: no AI model is available, or it gave no usable answer.',
+      translate: 'Translate full text',
+      translateAgain: 'Translate full text again',
+      translateFailed:
+        'No translation: no AI model is available, or it gave no answer.',
+      showOriginal: 'Show original',
+      showTranslation: 'Show translation',
+    },
     detail: {
       label: 'Item details',
       placeholder:
@@ -870,6 +886,23 @@ const enUS = {
       digestHour: 'Send after',
       readerAgentId: 'Runner agent for “Analyse again”',
       maxAgeDays: 'Collect items from',
+      readingLanguage: 'Reading language',
+    },
+    reading: {
+      interface: 'Same as the interface',
+      languages: {
+        original: 'Each item’s own language (no translation)',
+        'zh-CN': '简体中文',
+        'zh-TW': '繁體中文',
+        en: 'English',
+        ja: '日本語',
+        ko: '한국어',
+        es: 'Español',
+        fr: 'Français',
+        de: 'Deutsch',
+        pt: 'Português',
+        ru: 'Русский',
+      },
     },
     maxAge: {
       day: 'The past 24 hours',
@@ -904,6 +937,8 @@ const enUS = {
         'A runner agent opens the original and its discussion itself, including pages this server cannot fetch. Without one, or when it cannot finish, the model and the rules analyse as before.',
       readerAgentIdEmpty:
         'No runner agent is enabled. An administrator connects a runtime and enables agents under System settings → Runtimes and Agents.',
+      readingLanguage:
+        'The language of AI briefs and translations. Items in the feed get a brief from the AI model automatically, with foreign titles translated; the full text can be translated from the details. Briefs and analyses each count against the daily model limit.',
     },
     learned: {
       title: 'Learned from your feedback',

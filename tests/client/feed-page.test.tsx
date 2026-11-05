@@ -48,6 +48,7 @@ const listItem: FeedListItem = {
   participated: false,
   read: false,
   newReplies: 0,
+  brief: null,
 };
 
 const state: ItemState = {
@@ -65,6 +66,8 @@ const state: ItemState = {
 
 const detail: FeedItem = {
   ...listItem,
+  readingLanguage: 'en',
+  brief: null,
   externalId: '7',
   author: 'someone',
   body: 'We struggle to evaluate tool calls.',
@@ -152,6 +155,29 @@ const youtubeDetail: FeedItem = {
   summary: 'The video description.',
   body: null,
   media: [],
+};
+
+/** An English post briefed in Chinese: the brief places the post's own chart and tries an outside picture. */
+const briefed: FeedItem = {
+  ...noteDetail,
+  id: 20,
+  platform: 'hn',
+  title: 'Postgres backups restored in minutes',
+  body: 'We cut restore time from 3 hours to 4 minutes.',
+  readingLanguage: 'zh-CN',
+  brief: {
+    language: 'zh-CN',
+    sourceLanguage: 'en',
+    title: 'Postgres 备份几分钟内恢复',
+    gist: '作者把恢复时间从 3 小时降到 4 分钟。',
+    brief:
+      '作者把恢复时间从 3 小时降到 4 分钟。\n\n- 用了**增量快照**\n\n![恢复时间对比](media:2)\n\n![x](https://tracker.example/t.gif)\n\n<img src="https://tracker.example/raw.gif">',
+    body: null,
+    bodyStale: false,
+    stale: false,
+    model: 's/m',
+    createdAt: '2026-11-05T04:00:00Z',
+  },
 };
 
 let itemsResponse: unknown;
@@ -244,6 +270,21 @@ const api = vi.fn(({ method, path, query, json }: ApiCall) => {
         enrichable: ['body', 'comments'],
       },
     };
+  if (method === 'GET' && path === 'feedItems/20') return { data: briefed };
+  if (method === 'POST' && path === 'feedItems/20/translate')
+    return {
+      data: {
+        ...briefed,
+        brief: {
+          ...briefed.brief!,
+          body: '我们把恢复时间从 3 小时降到 4 分钟。',
+        },
+      },
+    };
+  if (method === 'GET' && path === 'feedItems/21')
+    return { data: { ...briefed, id: 21, brief: null } };
+  if (method === 'POST' && path === 'feedItems/21/brief')
+    return { data: { ...briefed, id: 21 } };
   if (method === 'GET' && path === 'feedItems/8')
     return { data: { ...detail, id: 8, title: 'Second item' } };
   if (method === 'PATCH' && path === 'feedItems/8/state')
@@ -934,6 +975,71 @@ describe('feed page', () => {
             link.getAttribute('href') === 'https://www.youtube.com/@channel',
         ),
     ).toBe(true);
+  });
+
+  it('puts the brief on the card: the translated title and the gist', async () => {
+    localStorage.clear();
+    itemsResponse = {
+      data: [{ ...listItem, ...briefed, brief: { ...briefed.brief! } }],
+      meta: {},
+    };
+    await renderAt('/');
+    const list = await screen.findByRole('region', {
+      name: enUS.feed.listLabel,
+    });
+    const card = await within(list).findByRole('button', {
+      name: /Postgres 备份几分钟内恢复/,
+    });
+    expect(card).toHaveTextContent('作者把恢复时间从 3 小时降到 4 分钟。');
+    expect(card).not.toHaveTextContent(briefed.excerpt!);
+  });
+
+  it('shows the brief first, with only the post’s own pictures, and folds the original', async () => {
+    await renderAt('/?item=20');
+    const brief = await screen.findByTestId('feed-brief');
+    expect(brief).toHaveTextContent('用了增量快照');
+    expect(within(brief).getByText('增量快照').tagName).toBe('STRONG');
+    const images = within(brief).getAllByRole('img');
+    expect(images).toHaveLength(1);
+    expect(images[0]).toHaveAttribute('src', `${CDN}/2`);
+    expect(images[0]).toHaveAccessibleName('恢复时间对比');
+    expect(brief.innerHTML).not.toContain('tracker.example');
+    // The translated title leads; the original stays under it.
+    expect(
+      screen.getByRole('heading', { name: 'Postgres 备份几分钟内恢复' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(briefed.title)).toBeInTheDocument();
+    // No brief is written again for an item that has one.
+    expect(
+      api.mock.calls.some(([call]) => call.path === 'feedItems/20/brief'),
+    ).toBe(false);
+
+    expect(
+      screen.queryByRole('region', { name: enUS.feed.detail.content }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: enUS.feed.brief.translate }),
+    );
+    const content = await screen.findByRole('region', {
+      name: enUS.feed.detail.content,
+    });
+    expect(content).toHaveTextContent('我们把恢复时间从 3 小时降到 4 分钟。');
+    await userEvent.click(
+      screen.getByRole('button', { name: enUS.feed.brief.showOriginal }),
+    );
+    expect(content).toHaveTextContent(briefed.body!);
+  });
+
+  it('writes a brief at once for an item that has none', async () => {
+    await renderAt('/?item=21');
+    const brief = await screen.findByTestId('feed-brief');
+    expect(brief).toHaveTextContent('作者把恢复时间从 3 小时降到 4 分钟。');
+    expect(
+      api.mock.calls.filter(
+        ([call]) =>
+          call.method === 'POST' && call.path === 'feedItems/21/brief',
+      ),
+    ).toHaveLength(1);
   });
 
   it('offers to fetch the text of a title-only note', async () => {

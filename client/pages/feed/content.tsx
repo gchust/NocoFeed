@@ -65,7 +65,7 @@ export function ArticleText({ text }: { readonly text: string }): ReactElement {
 }
 
 /** A picture from the platform's CDN, or a placeholder once it fails to load. */
-function RemoteImage({
+export function RemoteImage({
   src,
   alt,
   className,

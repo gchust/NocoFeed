@@ -8,6 +8,7 @@ the person's topics and experience, and the person keeps their own marks and not
 - Schema: `database/main/migrations/202610280001_create_feed.ts` (seven `feed*` tables, all scoped by `ownerId`) and
   `202611020003_feed_analysis_quality.ts` (quality, priority, gates), `202610290001_feed_engagement.ts` (learned word weights, digest settings, dismissal, reply follow-up, source streaks).
   `202611040001_feed_topic_searches.ts` (topic search terms, platforms, schedule; `feedSources.topicId`).
+  `202611100001_feed_briefs.ts` (`feedBriefs`, `feedProfiles.readingLanguage`).
   `202611050001_feed_runner_agent.ts` (`feedProfiles.readerAgentId`, `feedRuns.agentRunId`/`agentResult`).
   `202611060001_feed_item_media.ts` (`feedItems.media`: images and video links, see "The post first" below).
   `202611070001_feed_time_window.ts` (`feedProfiles.maxAgeDays`, `feedItems.timelineAt`).
@@ -56,6 +57,24 @@ the person's topics and experience, and the person keeps their own marks and not
   `FAILURE_ALERT` failures and `quiet` after `EMPTY_ALERT` empty runs spanning three days (single-item sources are never
   quiet). It is notified once until it recovers (`healthNotifiedAt`); configuration statuses (`unconfigured`,
   `unsupported`) do not count.
+
+## Briefs and translations
+
+- **A brief comes first.** For every item the feed shows (`discuss`/`learn`, not dismissed, not awaiting material,
+  collected in the last three days) `briefPending` asks the default chat model, a few per tick, for a brief in the
+  person's reading language: one sentence, then key points, as restricted Markdown (`brief.ts`). Foreign titles are
+  translated with it. The card shows the translated title and the brief's first paragraph; the detail shows the brief
+  above everything and folds the original. Opening an item without a brief writes one (`POST /feedItems/:id/brief`).
+- **Reading language** is `feedProfiles.readingLanguage`: a tag from `READING_LANGUAGES`, `original` (the item's own,
+  no translation), or null (follow the interface: `en-US` → `en`, else `zh-CN`). One `feedBriefs` row per item and
+  language; changing the language shows nothing until the next ticks write the new ones.
+- **Full text** is translated only when asked (`POST /feedItems/:id/translate`), stored in `feedBriefs.body` with the
+  item version it came from (`bodyVersion`).
+- **Budget.** Scheduled briefs count against `dailyLimit` on their own (rows written today); what the person asks for on
+  one item does not.
+- **Never HTML.** The material is untrusted, so the model writes Markdown, the server strips tags and any image that is
+  not `media:N` of the item, and the client (`client/pages/feed/brief.tsx`) renders without raw HTML, with links as text
+  and `media:N` resolved to the item's own image or video cover only.
 
 ## Topics and subscriptions
 
@@ -213,9 +232,9 @@ runtime someone connects, which can open pages themselves. NocoFeed hands one ta
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
-and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, read state, the post first: excerpt,
+and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, read state, the brief first, then the post: excerpt,
 cover, gallery, video, paragraphs, the YouTube player and card thumbnail; `tests/client/feed-youtube.test.ts` reads
-video ids). Read state and the default order: `tests/server/feed-read-state.test.ts` and
+video ids). Briefs: `tests/server/feed-briefs.test.ts` and `tests/database/feed-briefs-migration.test.ts`. Read state and the default order: `tests/server/feed-read-state.test.ts` and
 `tests/database/feed-read-state-migration.test.ts`. Text and media: `tests/server/feed-media-prefetch.test.ts`,
 `tests/database/feed-item-media-migration.test.ts` and the media case in `feed-collector-client.test.ts`. Runner agents:
 `tests/server/feed-runner-agent.test.ts` (hand-off, assembly, settling, fallbacks; an `ensureSystem` agent stands in

@@ -56,6 +56,46 @@ export interface Profile {
   readonly readerAgentId: string | null;
   /** Collection keeps items published within this many days; 0 keeps everything. */
   readonly maxAgeDays: number;
+  /** The language briefs and translations are written in; null follows the interface. */
+  readonly readingLanguage: ReadingLanguage | null;
+}
+
+export const READING_LANGUAGES = [
+  'original',
+  'zh-CN',
+  'zh-TW',
+  'en',
+  'ja',
+  'ko',
+  'es',
+  'fr',
+  'de',
+  'pt',
+  'ru',
+] as const;
+/** `original` keeps each item's own language. */
+export type ReadingLanguage = (typeof READING_LANGUAGES)[number];
+
+/** What the model wrote so the item can be taken in at a glance, in the reading language. */
+export interface ListBrief {
+  readonly language: ReadingLanguage;
+  /** The title in the reading language; null when it already is in it. */
+  readonly title: string | null;
+  /** The brief's first paragraph as plain text. */
+  readonly gist: string;
+  /** Written from an earlier version of the item. */
+  readonly stale: boolean;
+}
+
+export interface ItemBrief extends ListBrief {
+  readonly sourceLanguage: string | null;
+  /** Markdown without HTML; images are the item's own media as `media:N` (1-based). */
+  readonly brief: string;
+  /** The full text translated, once asked for. */
+  readonly body: string | null;
+  readonly bodyStale: boolean;
+  readonly model: string | null;
+  readonly createdAt: string;
 }
 
 export interface Topic {
@@ -180,6 +220,8 @@ export interface FeedListItem {
   /** The person has opened the item or marked it read. */
   readonly read: boolean;
   readonly newReplies: number;
+  /** The model's brief; null until one is written. */
+  readonly brief: ListBrief | null;
 }
 
 export interface PartCoverage {
@@ -258,7 +300,10 @@ export interface MediaEntry {
   readonly duration?: number;
 }
 
-export interface FeedItem extends FeedListItem {
+export interface FeedItem extends Omit<FeedListItem, 'brief'> {
+  /** The language this item's brief and translation are written in. */
+  readonly readingLanguage: ReadingLanguage;
+  readonly brief: ItemBrief | null;
   readonly externalId: string;
   readonly author: string | null;
   readonly body: string | null;

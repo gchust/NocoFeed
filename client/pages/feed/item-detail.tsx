@@ -8,6 +8,7 @@ import {
   CircleDotIcon,
   ClockIcon,
   DownloadIcon,
+  LanguagesIcon,
   EyeOffIcon,
   ExternalLinkIcon,
   MessageCircleReplyIcon,
@@ -42,6 +43,7 @@ import { Spinner } from '#components/ui/spinner';
 import { Textarea } from '#components/ui/textarea';
 import { cn } from 'cn';
 
+import { BriefMarkdown } from './brief.js';
 import { ArticleText, MediaGallery } from './content.js';
 import { noteText, relativeTime, requestProblem } from './format.js';
 import { ItemTime, LoadProblem, PlatformBadge, VerdictBadge } from './parts.js';
@@ -71,6 +73,8 @@ export interface ItemDetailProps {
 }
 
 type Busy =
+  | 'brief'
+  | 'translate'
   | 'analyze'
   | 'enrich'
   | 'favorite'
@@ -101,6 +105,12 @@ export function ItemDetail({
   }>();
   const [busy, setBusy] = useState<Busy>();
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  /** The original text is folded under the brief; null follows whether there is a brief. */
+  const [originalOpen, setOriginalOpen] = useState<boolean | null>(null);
+  /** Show the translation of the full text rather than the original, once there is one. */
+  const [showTranslation, setShowTranslation] = useState(true);
+  // The item whose brief could not be written on its own; it is not tried again until the person asks.
+  const [briefFailed, setBriefFailed] = useState<number>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -161,6 +171,35 @@ export function ItemDetail({
         () => undefined,
       );
   }, [api, loadedId, readOnOpen]);
+
+  // An item opened without a brief gets one at once, so that what it says is the first thing on the page.
+  const needsBrief =
+    loadedItem && !loadedItem.brief ? loadedItem.id : undefined;
+  const briefing = needsBrief !== briefFailed ? needsBrief : undefined;
+  useEffect(() => {
+    if (briefing === undefined) return;
+    const controller = new AbortController();
+    api
+      .request<{ data: FeedItem }>({
+        path: `feedItems/${encodeURIComponent(briefing)}/brief`,
+        method: 'POST',
+        signal: controller.signal,
+      })
+      .then(
+        ({ data }) => {
+          if (controller.signal.aborted) return;
+          setResult((current) =>
+            current?.item?.id === briefing
+              ? { ...current, item: data }
+              : current,
+          );
+        },
+        () => {
+          if (!controller.signal.aborted) setBriefFailed(briefing);
+        },
+      );
+    return () => controller.abort();
+  }, [api, briefing]);
 
   const replace = (next: FeedItem): void =>
     setResult({ key: reloadCount, item: next });
@@ -238,6 +277,49 @@ export function ItemDetail({
       });
     } catch (cause: unknown) {
       failed(cause);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const rewriteBrief = async (): Promise<void> => {
+    if (!item) return;
+    setBusy('brief');
+    try {
+      const { data } = await api.request<{ data: FeedItem }>({
+        path: `feedItems/${encodeURIComponent(item.id)}/brief`,
+        method: 'POST',
+      });
+      replace(data);
+      onChanged();
+    } catch (cause: unknown) {
+      if (requestProblem(cause) === 'unavailable')
+        toaster.show({ type: 'warning', title: t('feed.brief.failed') });
+      else failed(cause);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const translateText = async (): Promise<void> => {
+    if (!item) return;
+    setBusy('translate');
+    try {
+      const { data } = await api.request<{ data: FeedItem }>({
+        path: `feedItems/${encodeURIComponent(item.id)}/translate`,
+        method: 'POST',
+      });
+      replace(data);
+      setShowTranslation(true);
+      setOriginalOpen(true);
+      onChanged();
+    } catch (cause: unknown) {
+      if (requestProblem(cause) === 'unavailable')
+        toaster.show({
+          type: 'warning',
+          title: t('feed.brief.translateFailed'),
+        });
+      else failed(cause);
     } finally {
       setBusy(undefined);
     }
@@ -334,6 +416,15 @@ export function ItemDetail({
     (item.summary?.trim() && item.summary.trim() !== item.title.trim()
       ? item.summary.trim()
       : '');
+  const brief = item.brief;
+  const briefPending = !brief && briefFailed !== item.id;
+  const translation = brief?.body && showTranslation ? brief.body.trim() : '';
+  const canTranslate =
+    Boolean(text) &&
+    item.readingLanguage !== 'original' &&
+    !sameLanguage(brief?.sourceLanguage ?? null, item.readingLanguage) &&
+    (!brief?.body || brief.bodyStale);
+  const originalShown = originalOpen ?? !brief;
 
   return (
     <article className='flex flex-col gap-5 p-5' aria-busy={loading}>
@@ -348,7 +439,12 @@ export function ItemDetail({
           </div>
           {close}
         </div>
-        <h2 className='text-lg leading-snug font-semibold'>{item.title}</h2>
+        <h2 className='text-lg leading-snug font-semibold'>
+          {brief?.title ?? item.title}
+        </h2>
+        {brief?.title ? (
+          <p className='-mt-2 text-sm text-muted-foreground'>{item.title}</p>
+        ) : null}
         <div className='flex flex-wrap gap-2'>
           {item.url ? (
             <a
@@ -432,6 +528,57 @@ export function ItemDetail({
           </AlertDescription>
         </Alert>
       ) : null}
+
+      {/* What the post says comes first: the model's brief in the reading language. */}
+      <section
+        aria-labelledby='feed-brief'
+        className='flex flex-col gap-2 rounded-lg bg-muted/40 p-4'
+      >
+        <h3
+          id='feed-brief'
+          className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'
+        >
+          <SparklesIcon className='size-3.5' aria-hidden='true' />
+          {t('feed.brief.heading')}
+        </h3>
+        {brief ? (
+          <BriefMarkdown text={brief.brief} media={item.media} />
+        ) : briefPending ? (
+          <div
+            className='flex flex-col gap-2'
+            role='status'
+            aria-label={t('feed.brief.writing')}
+          >
+            <Skeleton className='h-4 w-full' />
+            <Skeleton className='h-4 w-5/6' />
+            <Skeleton className='h-4 w-2/3' />
+          </div>
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            {t('feed.brief.none')}
+          </p>
+        )}
+        <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          {brief?.stale ? <span>{t('feed.brief.stale')}</span> : null}
+          {brief?.model ? <span>{brief.model}</span> : null}
+          {briefPending ? null : (
+            <Button
+              type='button'
+              size='xs'
+              variant='ghost'
+              disabled={Boolean(busy)}
+              onClick={() => void rewriteBrief()}
+            >
+              {busy === 'brief' ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <RotateCwIcon data-icon='inline-start' />
+              )}
+              {brief ? t('feed.brief.rewrite') : t('feed.brief.write')}
+            </Button>
+          )}
+        </div>
+      </section>
 
       {/* The analysis is one line until asked for; the post itself is what the page shows. */}
       <Collapsible
@@ -642,42 +789,103 @@ export function ItemDetail({
         </CollapsibleContent>
       </Collapsible>
 
-      <section
-        aria-label={t('feed.detail.content')}
+      {/* The original follows, folded while a brief says what it says. */}
+      <Collapsible
+        open={originalShown}
+        onOpenChange={setOriginalOpen}
         className='flex flex-col gap-4'
       >
-        <MediaGallery media={item.media} youtube={youtube} title={item.title} />
-        {text ? (
-          <ArticleText text={text} />
-        ) : (
-          <p className='text-sm text-muted-foreground'>
-            {item.media.length || youtube
-              ? t('feed.detail.mediaOnly')
-              : t('feed.detail.titleOnly')}
-          </p>
-        )}
-        {item.enrichable.length > 0 ? (
-          <Button
-            type='button'
-            size='xs'
-            variant='outline'
-            className='self-start'
-            disabled={Boolean(busy)}
-            onClick={() => void enrich()}
-          >
-            {busy === 'enrich' ? (
-              <Spinner data-icon='inline-start' />
-            ) : (
-              <DownloadIcon data-icon='inline-start' />
-            )}
-            {t('feed.detail.fetch', {
-              parts: item.enrichable
-                .map((part) => t(`feed.parts.${part}`))
-                .join(t('feed.common.listSeparator')),
-            })}
-          </Button>
-        ) : null}
-      </section>
+        <div className='flex flex-wrap items-center gap-2'>
+          <CollapsibleTrigger className='flex items-center gap-1.5 rounded-md text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring/50'>
+            <ChevronDownIcon
+              className={cn(
+                'size-4 transition-transform',
+                !originalShown && '-rotate-90',
+              )}
+              aria-hidden='true'
+            />
+            {t('feed.detail.content')}
+          </CollapsibleTrigger>
+          {brief?.body ? (
+            <Button
+              type='button'
+              size='xs'
+              variant='outline'
+              aria-pressed={showTranslation}
+              onClick={() => {
+                setShowTranslation((shown) => !shown);
+                setOriginalOpen(true);
+              }}
+            >
+              <LanguagesIcon data-icon='inline-start' />
+              {showTranslation
+                ? t('feed.brief.showOriginal')
+                : t('feed.brief.showTranslation')}
+            </Button>
+          ) : null}
+          {canTranslate ? (
+            <Button
+              type='button'
+              size='xs'
+              variant='outline'
+              disabled={Boolean(busy)}
+              onClick={() => void translateText()}
+            >
+              {busy === 'translate' ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <LanguagesIcon data-icon='inline-start' />
+              )}
+              {brief?.bodyStale
+                ? t('feed.brief.translateAgain')
+                : t('feed.brief.translate')}
+            </Button>
+          ) : null}
+        </div>
+        <CollapsibleContent
+          role='region'
+          aria-label={t('feed.detail.content')}
+          className='flex flex-col gap-4'
+        >
+          <MediaGallery
+            media={item.media}
+            youtube={youtube}
+            title={item.title}
+          />
+          {translation ? (
+            <ArticleText text={translation} />
+          ) : text ? (
+            <ArticleText text={text} />
+          ) : (
+            <p className='text-sm text-muted-foreground'>
+              {item.media.length || youtube
+                ? t('feed.detail.mediaOnly')
+                : t('feed.detail.titleOnly')}
+            </p>
+          )}
+          {item.enrichable.length > 0 ? (
+            <Button
+              type='button'
+              size='xs'
+              variant='outline'
+              className='self-start'
+              disabled={Boolean(busy)}
+              onClick={() => void enrich()}
+            >
+              {busy === 'enrich' ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <DownloadIcon data-icon='inline-start' />
+              )}
+              {t('feed.detail.fetch', {
+                parts: item.enrichable
+                  .map((part) => t(`feed.parts.${part}`))
+                  .join(t('feed.common.listSeparator')),
+              })}
+            </Button>
+          ) : null}
+        </CollapsibleContent>
+      </Collapsible>
 
       {item.comments.length > 0 ? (
         <section
@@ -1118,4 +1326,21 @@ function FollowUpStatus({
       </AlertDescription>
     </Alert>
   );
+}
+
+/** Whether a language tag names the reading language: Chinese scripts apart, the primary language alone decides. */
+function sameLanguage(tag: string | null, reading: string): boolean {
+  if (!tag) return false;
+  const a = tag.toLowerCase();
+  const b = reading.toLowerCase();
+  if (a.startsWith('zh') || b.startsWith('zh')) {
+    const script = (value: string) =>
+      /^zh(-hant|-tw|-hk|-mo)/.test(value)
+        ? 'zh-hant'
+        : value.startsWith('zh')
+          ? 'zh-hans'
+          : value;
+    return script(a) === script(b);
+  }
+  return a.split('-')[0] === b.split('-')[0];
 }
