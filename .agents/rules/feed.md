@@ -188,6 +188,21 @@ the person's topics and experience, and the person keeps their own marks and not
   `routine` only rank low. Low worth hides an item whether the body was read or only a blurb. After changing a cap or
   the threshold, run `feed reapply-worth` (`--dry-run` first): it recomputes stored quality from the model's axes and
   only ever hides, calling no model.
+- **Heat is attention, not worth.** `heat.ts` turns a platform's counts into 0–100 (weights per platform on a log scale,
+  `HOT_HEAT` 60 ≈ the platform's front page); null when the platform gives no counts it can weigh. `feedItems.heat` is
+  the latest, `heatAtCollection` the value at collection (to check later whether what was recommended went on to trend),
+  `metricsCheckedAt` the last read (`202611110001_feed_item_heat.ts`). The `collect-due-sources` tick runs `refreshHeat`:
+  items published in the last `HEAT_WINDOW_MS` (3 days) on `REFRESHABLE_PLATFORMS` (HN, Reddit, Bilibili — read
+  natively through `adapters.metrics`; Collector platforms keep the counts from collection) are read again every
+  30 min / 2 h / 6 h by age, one lookup per external id for every owner. An item that crosses `HOT_HEAT` and was only
+  judged by the rules or stopped at a gate has its comments fetched and gets the full analysis past both gates
+  (`lookAtHotItem`, at most `HOT_ANALYSES_PER_TICK`, counted against `dailyLimit`). The model prompt shows the counts
+  as ENGAGEMENT and is told never to raise quality for them.
+- **Two ways in: `hot` and `solid`.** Both views list only recommended items (`discuss`/`learn`, not dismissed).
+  `hot` adds `heat >= HOT_HEAT` within the heat window and sorts by heat under `sort=priority`; `solid` adds
+  `quality >= SOLID_QUALITY` (60, so only model analyses) and sorts by quality. The client opens both in that order
+  (`defaultSort`). The digest leads with the three hottest recommendations published in the last day and does not
+  repeat them below. HN `top` and `best` are ranked lists: they are never `truncated`, since they are not in time order.
 - Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
 - **Publication times.** `publishedAt` is null when the platform gave none; `timelineAt` then holds the collection time
   so the item can still be placed, and the feed labels it "collected …" — never as the publication time.
@@ -230,6 +245,7 @@ runtime someone connects, which can open pages themselves. NocoFeed hands one ta
 `tests/database/feed-migration.test.ts` and `feed-engagement-migration.test.ts`, `tests/server/feed-routes.test.ts`
 (sessions and owner isolation), `tests/server/feed-engagement.test.ts` (feedback weights, digest, dismissal, follow-up
 and health notices with stubbed adapters), `tests/server/feed-analysis.test.ts` (parser, rules, weights and schedules)
+`tests/server/feed-heat.test.ts` and `feed-heat-adapters.test.ts` (heat, refresh, hot/solid views, digest),
 `tests/server/feed-topic-searches.test.ts` and `tests/database/feed-topic-searches-migration.test.ts` (topic searches,
 which topics judge what), `tests/client/topics-page.test.tsx` (topic searches in the form and on the card)
 and `tests/client/feed-page.test.tsx` (views, digest, keyboard triage, density, read state, the brief first, then the post: excerpt,

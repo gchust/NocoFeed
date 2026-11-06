@@ -26,6 +26,15 @@ export interface Adapters {
    * comment, the whole discussion when it points at the post. `null` when the platform or link is not supported.
    */
   replyCount(url: string, signal: AbortSignal): Promise<number | null>;
+  /**
+   * The item's counts as they are now (points, comments, views…), read again without the Collector. `null` when the
+   * platform cannot be read that way (`REFRESHABLE_PLATFORMS` in `heat.ts`) or the item is gone.
+   */
+  metrics(
+    platform: string,
+    externalId: string,
+    signal: AbortSignal,
+  ): Promise<Record<string, number> | null>;
 }
 
 /** Whether `replyCount` can follow this link. */
@@ -56,6 +65,10 @@ export function createAdapters(config: () => FeedConfig): Adapters {
     (request: CollectRequest) => Promise<CollectResult>
   > = {
     'hn:new': (request) => collectHackerNews(http, 'newstories', request),
+    'hn:top': (request) =>
+      collectHackerNews(http, 'topstories', request, { ranked: true }),
+    'hn:best': (request) =>
+      collectHackerNews(http, 'beststories', request, { ranked: true }),
     'hn:ask': (request) => collectHackerNews(http, 'askstories', request),
     'hn:show': (request) => collectHackerNews(http, 'showstories', request),
     'reddit:community': (request) => collectReddit(http, request),
@@ -106,6 +119,64 @@ export function createAdapters(config: () => FeedConfig): Adapters {
       }
       const count = post?.data?.children?.[0]?.data.num_comments;
       return typeof count === 'number' ? count : null;
+    },
+
+    async metrics(platform, externalId, signal) {
+      if (platform === 'hn') {
+        if (!/^\d+$/.test(externalId)) return null;
+        const item = await http.json<HnItem | null>(
+          `${HN}/item/${externalId}.json`,
+          signal,
+        );
+        if (!item || item.deleted || item.dead) return null;
+        return (
+          compact({ points: item.score, comments: item.descendants }) ?? null
+        );
+      }
+      if (platform === 'reddit') {
+        if (!/^[a-z0-9]+$/i.test(externalId)) return null;
+        const listing = await http.json<RedditListing>(
+          `https://www.reddit.com/by_id/t3_${externalId}.json?raw_json=1`,
+          signal,
+        );
+        const post = listing.data?.children?.[0]?.data;
+        if (!post) return null;
+        return (
+          compact({
+            points: numberOrUndefined(post.score),
+            comments: numberOrUndefined(post.num_comments),
+          }) ?? null
+        );
+      }
+      if (platform === 'bilibili') {
+        if (!/^BV[0-9A-Za-z]{10}$/.test(externalId)) return null;
+        const response = await http.json<{
+          code: number;
+          data?: {
+            stat?: {
+              view?: number;
+              like?: number;
+              reply?: number;
+              favorite?: number;
+            };
+          };
+        }>(
+          `https://api.bilibili.com/x/web-interface/view?bvid=${externalId}`,
+          signal,
+          { referer: 'https://www.bilibili.com/' },
+        );
+        if (response.code !== 0 || !response.data?.stat) return null;
+        const stat = response.data.stat;
+        return (
+          compact({
+            views: stat.view,
+            likes: stat.like,
+            comments: stat.reply,
+            favorites: stat.favorite,
+          }) ?? null
+        );
+      }
+      return null;
     },
 
     async collect(request) {
@@ -366,11 +437,15 @@ async function collectHackerNews(
   http: Http,
   list: string,
   request: CollectRequest,
+  { ranked = false }: { ranked?: boolean } = {},
 ): Promise<CollectResult> {
   const ids = (
     await http.json<number[]>(`${HN}/${list}.json`, request.signal)
   ).map(String);
-  const { fresh, truncated } = windowed(ids, request);
+  const windowedIds = windowed(ids, request);
+  const fresh = windowedIds.fresh;
+  // A ranked list is not in time order: reaching no known id says nothing about what was skipped.
+  const truncated = ranked ? false : windowedIds.truncated;
   const items = await mapLimit(fresh, 6, (id) =>
     http.json<HnItem | null>(`${HN}/item/${id}.json`, request.signal),
   );

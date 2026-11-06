@@ -11,6 +11,8 @@ import {
   GraduationCapIcon,
   CheckCheckIcon,
   LayersIcon,
+  FlameIcon,
+  GemIcon,
   MailCheckIcon,
   RefreshCwIcon,
   Rows3Icon,
@@ -78,12 +80,15 @@ import {
   SORTS,
   type Topic,
   VIEWS,
+  defaultSort,
 } from './types.js';
 import { useMediaQuery } from './use-media-query.js';
 
 const VIEW_ICONS = {
   digest: SunriseIcon,
   all: LayersIcon,
+  hot: FlameIcon,
+  solid: GemIcon,
   discuss: MessagesSquareIcon,
   learn: GraduationCapIcon,
   saved: BookmarkIcon,
@@ -133,9 +138,12 @@ export default function FeedPage(): ReactElement {
   )
     ? (params.get('period') as FeedPeriod)
     : undefined;
-  // Newest first unless the person chose otherwise.
-  const sort: FeedSort =
-    params.get('sort') === 'priority' ? 'priority' : 'newest';
+  // The view's own order unless the person chose otherwise.
+  const sort: FeedSort = (SORTS as readonly string[]).includes(
+    params.get('sort') ?? '',
+  )
+    ? (params.get('sort') as FeedSort)
+    : defaultSort(view);
   const unreadOnly = params.get('unread') === '1';
   const q = params.get('q') ?? '';
   const selectedId = Number(params.get('item')) || undefined;
@@ -962,8 +970,8 @@ function FeedRail({
           value={sort}
           onValueChange={(value) =>
             onChange({
-              // The default order stays out of the address.
-              sort: value === 'priority' ? 'priority' : undefined,
+              // The view's default order stays out of the address.
+              sort: value === defaultSort(view) ? undefined : String(value),
               item: undefined,
             })
           }

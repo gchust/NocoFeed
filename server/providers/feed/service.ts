@@ -56,8 +56,15 @@ import {
   SEARCH_PLATFORMS,
   type Platform,
 } from './catalog.js';
+import {
+  HEAT_WINDOW_MS,
+  HOT_HEAT,
+  REFRESHABLE_PLATFORMS,
+  heatOf,
+  refreshInterval,
+} from './heat.js';
 import { coverOf } from './media.js';
-import { truncate } from './text.js';
+import { mapLimit, truncate } from './text.js';
 import { createHash } from 'node:crypto';
 import type {
   CollectResult,
@@ -71,8 +78,21 @@ import type {
 } from './types.js';
 
 export type TopicMode = 'both' | 'participate' | 'learn';
+/**
+ * `hot` and `solid` are two ways into the recommended items: what is getting attention right now (`heat`), and what the
+ * analysis found to be substantial (`quality`), whatever its attention.
+ */
 export type FeedView =
-  'all' | 'discuss' | 'learn' | 'saved' | 'later' | 'participated';
+  | 'all'
+  | 'hot'
+  | 'solid'
+  | 'discuss'
+  | 'learn'
+  | 'saved'
+  | 'later'
+  | 'participated';
+/** From here a model analysis counts as solid: real substance, new, supported, usable (see `qualityOf`). */
+export const SOLID_QUALITY = 60;
 /** How far back the feed list reaches, by when an item was published. */
 export type FeedPeriod = 'day' | 'week' | 'month';
 /** `newest` (publication time, newest first) is the default; `priority` puts what is most worth reading first. */
@@ -192,6 +212,8 @@ export interface StateChange extends ItemState {
 
 export interface FeedDigest {
   since: string;
+  /** What is getting the most attention among the recommended items published in the last day. */
+  hot: FeedListItem[];
   discuss: FeedListItem[];
   learn: FeedListItem[];
 }
@@ -243,6 +265,8 @@ export interface FeedListItem {
   verdict: Analysis['verdict'] | null;
   score: number;
   quality: number | null;
+  /** Attention on its own platform, 0-100 (`heat.ts`); null when unknown. Never a measure of worth. */
+  heat: number | null;
   noise: NoiseKind;
   gate: AnalysisGate | null;
   topicId: number | null;
@@ -345,6 +369,8 @@ export interface Run {
 
 export interface FeedSummary {
   all: number;
+  hot: number;
+  solid: number;
   discuss: number;
   learn: number;
   saved: number;
@@ -508,6 +534,11 @@ const PREFETCH_STOPS = new Set([
  * 30 days, each video at most once a day.
  */
 const PUBLISHED_PLATFORMS = ['youtube'];
+/** Counts read again per tick, and how long that may take; recent items come first when more are due. */
+const HEAT_PER_TICK = 60;
+const HEAT_BUDGET_MS = 60_000;
+/** Items that just turned hot and still lack a model's view get one, a few per tick (each counts against `dailyLimit`). */
+const HOT_ANALYSES_PER_TICK = 5;
 const PUBLISHED_PER_TICK = 5;
 /** Briefs written per tick, for shown items collected within this window. */
 const BRIEF_PER_TICK = 5;
@@ -1441,6 +1472,9 @@ export function createFeedService(deps: FeedServiceDeps) {
               transcript: item.transcript ?? null,
               media: item.media?.length ? item.media : null,
               metrics: item.metrics ?? null,
+              heat: heatOf(source.platform, item.metrics),
+              heatAtCollection: heatOf(source.platform, item.metrics),
+              metricsCheckedAt: now,
               coverage: item.coverage,
               contentVersion: 1,
               publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
@@ -1736,6 +1770,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     comments: json<CommentEntry[] | null>(row.comments, null),
     transcript: json<TranscriptSegment[] | null>(row.transcript, null),
     media: json<MediaEntry[] | null>(row.media, null),
+    metrics: json<Record<string, number> | null>(row.metrics, null),
     coverage: json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE),
   });
 
@@ -2430,6 +2465,148 @@ export function createFeedService(deps: FeedServiceDeps) {
   }
 
   /**
+   * Reads again the counts of recent items on platforms this server can read without the Collector, as often as their
+   * age calls for (`refreshInterval`), and updates their heat. One lookup serves every owner's copy. An item that turned
+   * hot here and was only judged by the rules or stopped at a gate gets the full analysis it skipped: attention is a
+   * reason to look properly, not a verdict. Returns how many items were read.
+   */
+  async function refreshHeat({
+    limit = HEAT_PER_TICK,
+    now = new Date(),
+  }: { limit?: number; now?: Date } = {}): Promise<number> {
+    const rows = await database
+      .query()
+      .selectFrom('feedItems')
+      .select([
+        'id',
+        'ownerId',
+        'platform',
+        'externalId',
+        'sourceId',
+        'timelineAt',
+        'heat',
+        'metricsCheckedAt',
+      ])
+      .where('platform', 'in', [...REFRESHABLE_PLATFORMS])
+      .where('timelineAt', '>=', new Date(now.getTime() - HEAT_WINDOW_MS))
+      .execute<Row>();
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) {
+      const age = now.getTime() - new Date(row.timelineAt as Date).getTime();
+      const interval = refreshInterval(Math.max(0, age));
+      if (interval == null) continue;
+      const checked = row.metricsCheckedAt
+        ? new Date(row.metricsCheckedAt as Date).getTime()
+        : null;
+      if (checked != null && now.getTime() - checked < interval) continue;
+      const key = `${String(row.platform)}:${String(row.externalId)}`;
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    // The youngest first: their attention moves fastest.
+    const due = [...groups.values()]
+      .sort(
+        (a, b) =>
+          new Date(b[0].timelineAt as Date).getTime() -
+          new Date(a[0].timelineAt as Date).getTime(),
+      )
+      .slice(0, limit);
+    const deadline = Date.now() + HEAT_BUDGET_MS;
+    const turnedHot: Row[] = [];
+    let read = 0;
+    await mapLimit(due, 6, async (group) => {
+      if (Date.now() >= deadline) return;
+      const first = group[0];
+      let metrics: Record<string, number> | null = null;
+      try {
+        metrics = await adapters.metrics(
+          String(first.platform),
+          String(first.externalId),
+          AbortSignal.timeout(15_000),
+        );
+      } catch (error) {
+        deps.log('warn', 'feed heat refresh failed', {
+          platform: first.platform,
+          externalId: first.externalId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // Checked either way, so an item that cannot be read waits its turn instead of being asked every tick.
+      const heat = metrics ? heatOf(String(first.platform), metrics) : null;
+      for (const row of group)
+        await repo('feedItems').updateOne({
+          filter: { id: Number(row.id) },
+          values: {
+            metricsCheckedAt: now,
+            ...(metrics ? { metrics, heat } : {}),
+          },
+        } as never);
+      if (!metrics) return;
+      read += 1;
+      for (const row of group)
+        if (
+          heat != null &&
+          heat >= HOT_HEAT &&
+          Number(row.heat ?? -1) < HOT_HEAT
+        )
+          turnedHot.push(row);
+    });
+    let analysed = 0;
+    for (const row of turnedHot) {
+      if (analysed >= HOT_ANALYSES_PER_TICK) break;
+      try {
+        if (await lookAtHotItem(String(row.ownerId), Number(row.id)))
+          analysed += 1;
+      } catch (error) {
+        deps.log('warn', 'feed hot analysis failed', {
+          itemId: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return read;
+  }
+
+  /**
+   * Gives an item that just turned hot the analysis it skipped: its discussion first where the platform has one, then
+   * the model past both gates. An item a model already judged keeps that judgement. Returns whether it analysed.
+   */
+  async function lookAtHotItem(
+    ownerId: string,
+    itemId: number,
+  ): Promise<boolean> {
+    const current = (await repo('feedAnalyses').findOne({
+      filter: { itemId, current: true },
+    })) as Row | null;
+    if (current && current.engine === 'model' && current.gate == null)
+      return false;
+    const row = await requireRow('feedItems', ownerId, itemId);
+    const sourceId = row.sourceId == null ? null : Number(row.sourceId);
+    const source =
+      sourceId == null
+        ? null
+        : ((await repo('feedSources').findOne({
+            filter: { ownerId, id: sourceId },
+          })) as Row | null);
+    const coverage = json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE);
+    const canRead = enrichableFor(
+      String(row.platform),
+      source ? String(source.operation) : null,
+    );
+    // The discussion is what made it hot; read it before judging whether to join in.
+    if (
+      canRead.includes('comments') &&
+      !['available', 'partial'].includes(coverage.comments?.status ?? '')
+    ) {
+      await fetchMaterial(ownerId, row, ['comments'], {
+        trigger: 'schedule',
+        asked: false,
+      });
+    }
+    await analyzeItems(ownerId, [itemId], sourceId, { asked: true });
+    return true;
+  }
+
+  /**
    * Replaces a missing or approximate publication time with the exact one the Collector reads from the item's page, and
    * moves the item to that time in the feed. Every owner's copy of a video is updated by one lookup. A lookup that
    * found nothing is not repeated for a day; one the Collector could not make (sign-in, rate limit, no Collector) is
@@ -2929,6 +3106,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     verdict: (analysis?.verdict as FeedListItem['verdict']) ?? null,
     score: Number(analysis?.score ?? 0),
     quality: analysis?.quality == null ? null : Number(analysis.quality),
+    heat: row.heat == null ? null : Number(row.heat),
     noise:
       json<QualityDetail | null>(analysis?.qualityDetail, null)?.noise ??
       'none',
@@ -2992,11 +3170,26 @@ export function createFeedService(deps: FeedServiceDeps) {
       case 'all':
         builder = builder.where('a.verdict', 'in', ['discuss', 'learn']);
         break;
+      // Attention alone recommends nothing: a hot item still has to concern the person and be worth something.
+      case 'hot':
+        builder = builder
+          .where('a.verdict', 'in', ['discuss', 'learn'])
+          .where('i.heat', '>=', HOT_HEAT)
+          .where('i.timelineAt', '>=', new Date(Date.now() - HEAT_WINDOW_MS));
+        break;
+      case 'solid':
+        builder = builder
+          .where('a.verdict', 'in', ['discuss', 'learn'])
+          .where('a.quality', '>=', SOLID_QUALITY);
+        break;
       default:
         break;
     }
     // Dismissed items leave the feed; what the person kept on purpose stays in its own view.
-    if (query.view && ['all', 'discuss', 'learn'].includes(query.view))
+    if (
+      query.view &&
+      ['all', 'hot', 'solid', 'discuss', 'learn'].includes(query.view)
+    )
       builder = builder.where((eb) =>
         eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
       );
@@ -3053,6 +3246,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           Number(Buffer.from(query.pageToken, 'base64url').toString()) || 0,
         )
       : 0;
+    // "Most worth seeing" means what each view is about: attention for `hot`, substance for `solid`, else priority.
     const ordered =
       query.sort !== 'priority'
         ? feedQuery(ownerId, query)
@@ -3060,10 +3254,22 @@ export function createFeedService(deps: FeedServiceDeps) {
             .select(['i.id as id', 'i.timelineAt as timelineAt'])
             .orderBy('i.timelineAt', 'desc')
             .orderBy('i.id', 'desc')
-        : feedQuery(ownerId, query)
-            .select(['i.id as id', 'a.priority as priority'])
-            .orderBy('a.priority', 'desc')
-            .orderBy('i.id', 'desc');
+        : query.view === 'hot'
+          ? feedQuery(ownerId, query)
+              .select(['i.id as id', 'i.heat as heat'])
+              .orderBy('i.heat', 'desc')
+              .orderBy('a.priority', 'desc')
+              .orderBy('i.id', 'desc')
+          : query.view === 'solid'
+            ? feedQuery(ownerId, query)
+                .select(['i.id as id', 'a.quality as quality'])
+                .orderBy('a.quality', 'desc')
+                .orderBy('a.priority', 'desc')
+                .orderBy('i.id', 'desc')
+            : feedQuery(ownerId, query)
+                .select(['i.id as id', 'a.priority as priority'])
+                .orderBy('a.priority', 'desc')
+                .orderBy('i.id', 'desc');
     const page = await ordered
       .limit(query.pageSize + 1)
       .offset(offset)
@@ -3093,6 +3299,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           'publishedApproximate',
           'createdAt',
           'contentVersion',
+          'heat',
         ])
         .where('ownerId', '=', ownerId)
         .where('id', 'in', ids)
@@ -3177,6 +3384,8 @@ export function createFeedService(deps: FeedServiceDeps) {
     };
     const views = [
       'all',
+      'hot',
+      'solid',
       'discuss',
       'learn',
       'saved',
@@ -3193,9 +3402,12 @@ export function createFeedService(deps: FeedServiceDeps) {
         .execute(),
       listSources(ownerId),
     ]);
-    const [all, discuss, learn, saved, later, participated] = counts;
+    const [all, hot, solid, discuss, learn, saved, later, participated] =
+      counts;
     return {
       all,
+      hot,
+      solid,
       discuss,
       learn,
       saved,
@@ -3582,7 +3794,14 @@ export function createFeedService(deps: FeedServiceDeps) {
     now = new Date(),
   ): Promise<FeedDigest> {
     const since = new Date(now.getTime() - 24 * HOUR_MS);
-    const [discuss, learn] = await Promise.all([
+    const [hot, discuss, learn] = await Promise.all([
+      // Published in the last day, wherever it was collected: an item can turn hot after it came in.
+      listItems(ownerId, {
+        view: 'hot',
+        sort: 'priority',
+        period: 'day',
+        pageSize: 3,
+      }),
       listItems(ownerId, {
         view: 'discuss',
         sort: 'priority',
@@ -3596,6 +3815,8 @@ export function createFeedService(deps: FeedServiceDeps) {
         since,
       }),
     ]);
+    // An item shows once: the hot list keeps it.
+    const hotIds = new Set(hot.items.map((item) => item.id));
     const newestFirst = (items: FeedListItem[]) =>
       [...items].sort(
         (a, b) =>
@@ -3604,8 +3825,11 @@ export function createFeedService(deps: FeedServiceDeps) {
       );
     return {
       since: since.toISOString(),
-      discuss: newestFirst(discuss.items),
-      learn: newestFirst(learn.items),
+      hot: hot.items,
+      discuss: newestFirst(
+        discuss.items.filter((item) => !hotIds.has(item.id)),
+      ),
+      learn: newestFirst(learn.items.filter((item) => !hotIds.has(item.id))),
     };
   }
 
@@ -3629,7 +3853,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       if (last === today.date) continue;
       try {
         const content = await digest(ownerId, now);
-        const picks = [...content.discuss, ...content.learn];
+        const picks = [...content.hot, ...content.discuss, ...content.learn];
         if (picks.length) {
           const zh = row.locale === 'zh-CN';
           const delivered = await deps.notify({
@@ -3639,8 +3863,8 @@ export function createFeedService(deps: FeedServiceDeps) {
             referenceId: today.date,
             path: '/?view=digest',
             title: zh
-              ? `今日简报：${content.discuss.length} 条值得参与，${content.learn.length} 条值得学习`
-              : `Today: ${content.discuss.length} to join, ${content.learn.length} to learn from`,
+              ? `今日简报：${content.hot.length} 条热点，${content.discuss.length} 条值得参与，${content.learn.length} 条值得学习`
+              : `Today: ${content.hot.length} trending, ${content.discuss.length} to join, ${content.learn.length} to learn from`,
             body: picks
               .map((item, index) => `${index + 1}. ${truncate(item.title, 90)}`)
               .join('\n'),
@@ -3791,6 +4015,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     markAllRead,
     enrichItem,
     prefetchWaiting,
+    refreshHeat,
     resolvePublishedTimes,
     reanalyzeItem,
     settleAgentReads,

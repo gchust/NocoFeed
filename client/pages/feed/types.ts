@@ -19,6 +19,8 @@ export type Platform = (typeof PLATFORMS)[number];
 export const VIEWS = [
   'digest',
   'all',
+  'hot',
+  'solid',
   'discuss',
   'learn',
   'saved',
@@ -33,6 +35,15 @@ export type FeedPeriod = (typeof PERIODS)[number];
 /** `newest` is the default order; `priority` is chosen on purpose. */
 export const SORTS = ['newest', 'priority'] as const;
 export type FeedSort = (typeof SORTS)[number];
+/**
+ * `hot` and `solid` exist to put the most attended or most substantial first, so they open in that order; every other
+ * view opens newest first.
+ */
+export function defaultSort(view: FeedView): FeedSort {
+  return view === 'hot' || view === 'solid' ? 'priority' : 'newest';
+}
+/** From here an item counts as hot, as the server's `HOT_HEAT`. */
+export const HOT_HEAT = 60;
 export type ListView = Exclude<FeedView, 'digest'>;
 
 export const TOPIC_MODES = ['both', 'participate', 'learn'] as const;
@@ -204,6 +215,8 @@ export interface FeedListItem {
   readonly verdict: Verdict | null;
   readonly score: number;
   readonly quality: number | null;
+  /** Attention on its own platform, 0-100; null when unknown. Not a measure of worth. */
+  readonly heat: number | null;
   readonly noise: NoiseKind;
   readonly gate: AnalysisGate | null;
   readonly topicId: number | null;
@@ -348,6 +361,7 @@ export interface FeedSummary extends Readonly<Record<ListView, number>> {
 
 export interface FeedDigest {
   readonly since: string;
+  readonly hot: readonly FeedListItem[];
   readonly discuss: readonly FeedListItem[];
   readonly learn: readonly FeedListItem[];
 }
