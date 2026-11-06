@@ -95,3 +95,79 @@ describe('reading counts again', () => {
     expect(requested).toHaveLength(2);
   });
 });
+
+const connectFailure = () =>
+  new TypeError('fetch failed', {
+    cause: Object.assign(new Error('Connect Timeout Error'), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    }),
+  });
+
+describe('unreachable addresses', () => {
+  it('tries again when a request could not connect, and only then', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) throw connectFailure();
+        return Response.json(story(42, 77));
+      }),
+    );
+    const signal = new AbortController().signal;
+    expect(await createAdapters(config).metrics('hn', '42', signal)).toEqual({
+      points: 77,
+      comments: 77,
+    });
+    expect(calls).toBe(2);
+
+    // A server that answered is never asked twice.
+    calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        return new Response('oops', { status: 500 });
+      }),
+    );
+    await expect(
+      createAdapters(config).metrics('hn', '42', signal),
+    ).rejects.toThrow(/answered 500/);
+    expect(calls).toBe(1);
+  });
+
+  it('gives up after three attempts', async () => {
+    const fetch = vi.fn(async () => {
+      throw connectFailure();
+    });
+    vi.stubGlobal('fetch', fetch);
+    await expect(
+      createAdapters(config).metrics('hn', '42', new AbortController().signal),
+    ).rejects.toThrow(/fetch failed/);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the stories it could read when one cannot be reached', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes('/topstories.json')) return Response.json([3, 2]);
+        if (url.includes('/item/3.json')) throw connectFailure();
+        return Response.json(story(2, 120));
+      }),
+    );
+    const result = await createAdapters(config).collect({
+      platform: 'hn',
+      operation: 'top',
+      target: '',
+      limit: 2,
+      cursor: null,
+      knownIds: new Set(),
+      signal: new AbortController().signal,
+    });
+    // Story 3 is not stored, so the next run asks for it again.
+    expect(result.status).toBe('partial');
+    expect(result.items.map((item) => item.externalId)).toEqual(['2']);
+  });
+});

@@ -298,6 +298,25 @@ interface RequestOptions {
   service?: boolean;
 }
 
+/** How often a request that could not connect is tried in all. */
+const CONNECT_ATTEMPTS = 3;
+/** Errors raised before any byte was exchanged: trying again cannot repeat anything the server did. */
+const CONNECT_ERRORS = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+]);
+
+/** Whether `fetch` failed while connecting: a host whose name resolves to some unreachable addresses does this. */
+export function failedToConnect(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === 'AbortError') return false;
+  const cause = (error as { cause?: { code?: unknown } }).cause;
+  return typeof cause?.code === 'string' && CONNECT_ERRORS.has(cause.code);
+}
+
 function createHttp(config: () => FeedConfig): Http {
   const request = async (
     url: string,
@@ -305,23 +324,36 @@ function createHttp(config: () => FeedConfig): Http {
     signal: AbortSignal,
     options: RequestOptions = {},
   ): Promise<Response> => {
-    const timeout = AbortSignal.timeout(options.timeoutMs ?? 30_000);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        ...init,
-        headers: {
-          'user-agent': config().userAgent,
-          ...(init.headers as Record<string, string> | undefined),
-        },
-        signal: AbortSignal.any([signal, timeout]),
-        redirect: 'follow',
-      });
-    } catch (error) {
-      throw new AdapterError(
-        'failed',
-        `${new URL(url).host}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    let response: Response | undefined;
+    // A name can resolve to some addresses this network cannot reach; a new attempt resolves again and usually lands
+    // on one that answers. Only failures to connect are tried again, never a request the server received.
+    for (let attempt = 1; !response; attempt += 1) {
+      try {
+        response = await fetch(url, {
+          ...init,
+          headers: {
+            'user-agent': config().userAgent,
+            ...(init.headers as Record<string, string> | undefined),
+          },
+          // Each attempt has the whole time limit: a failed connection should not eat into the next one's.
+          signal: AbortSignal.any([
+            signal,
+            AbortSignal.timeout(options.timeoutMs ?? 30_000),
+          ]),
+          redirect: 'follow',
+        });
+      } catch (error) {
+        if (
+          attempt < CONNECT_ATTEMPTS &&
+          !signal.aborted &&
+          failedToConnect(error)
+        )
+          continue;
+        throw new AdapterError(
+          'failed',
+          `${new URL(url).host}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     if (
       options.service &&
@@ -446,11 +478,25 @@ async function collectHackerNews(
   const fresh = windowedIds.fresh;
   // A ranked list is not in time order: reaching no known id says nothing about what was skipped.
   const truncated = ranked ? false : windowedIds.truncated;
-  const items = await mapLimit(fresh, 6, (id) =>
-    http.json<HnItem | null>(`${HN}/item/${id}.json`, request.signal),
-  );
+  // One story that cannot be read is left for the next run rather than failing the whole list.
+  let unread = 0;
+  const items = await mapLimit(fresh, 6, async (id) => {
+    try {
+      return await http.json<HnItem | null>(
+        `${HN}/item/${id}.json`,
+        request.signal,
+      );
+    } catch (error) {
+      if (request.signal.aborted || !(error instanceof AdapterError))
+        throw error;
+      unread += 1;
+      return null;
+    }
+  });
+  if (unread && unread === fresh.length)
+    throw new AdapterError('failed', `${HN}: no story could be read`);
   return {
-    status: 'ok',
+    status: unread ? 'partial' : 'ok',
     truncated,
     items: items
       .filter((item): item is HnItem =>
