@@ -272,3 +272,20 @@ export function extractArticle(page: FetchedPage): PageArticle {
     media: media?.length ? media : undefined,
   };
 }
+
+/** A public page as text for a reader (the conversation about an item): where it was read, its title and its text. */
+export async function readPageText(
+  address: string,
+  options: PageFetchOptions,
+): Promise<{ url: string; title: string; text: string }> {
+  const page = await fetchPage(address, options);
+  const article = extractArticle(page);
+  const body = article.body?.trim() ?? '';
+  const summary = article.summary?.trim() ?? '';
+  // The description is usually the opening of the text; keep it only when the text does not already say it.
+  const text =
+    summary && !body.includes(summary)
+      ? [summary, body].filter(Boolean).join('\n\n')
+      : body;
+  return { url: page.url, title: article.title, text };
+}

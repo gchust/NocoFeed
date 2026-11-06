@@ -15,15 +15,10 @@ import {
 import type { FeedConfig } from '../../config/feed.js';
 import { createAdapters, type Adapters } from './adapters.js';
 import { feedItemSubject } from './agent-reader.js';
-import {
-  ASK_THREAD,
-  ASK_TRIGGER,
-  createFeedAsk,
-  fetchPageText,
-  type FeedAsk,
-} from './ask.js';
+import { ASK_THREAD, ASK_TRIGGER, createFeedAsk, type FeedAsk } from './ask.js';
 import { createIngest, type FeedIngest } from './ingest.js';
 import { createMailCollector, withMail, type MailCollector } from './mail.js';
+import { readPageText } from './page.js';
 import { createRescoreJob } from './rescore-job.js';
 import { createFeedService, type FeedService } from './service.js';
 
@@ -112,7 +107,9 @@ export default class FeedProvider extends ServiceProvider<Application> {
         getItem: (ownerId, id) => feed().getItem(ownerId, id),
         getProfile: (ownerId) => feed().getProfile(ownerId),
         readPage: (url, signal) =>
-          fetchPageText(url, signal, config().userAgent),
+          readPageText(url, { signal, userAgent: config().userAgent }),
+        fetchParts: (ownerId, itemId, want) =>
+          feed().fetchParts(ownerId, itemId, want),
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });

@@ -2367,7 +2367,19 @@ export function createFeedService(deps: FeedServiceDeps) {
     ownerId: string,
     row: Row,
     want: ('body' | 'comments' | 'transcript')[],
-    { trigger, asked }: { trigger: 'schedule' | 'manual'; asked: boolean },
+    {
+      trigger,
+      asked,
+      signal,
+      deferAnalysis = false,
+    }: {
+      trigger: 'schedule' | 'manual';
+      asked: boolean;
+      /** Stops the fetch early; the run's own limit applies either way. */
+      signal?: AbortSignal;
+      /** Start the analysis the item waited for without waiting for it (a conversation is waiting instead). */
+      deferAnalysis?: boolean;
+    },
   ): Promise<EnrichResult> {
     const itemId = Number(row.id);
     const runId = await startRun({
@@ -2383,7 +2395,9 @@ export function createFeedService(deps: FeedServiceDeps) {
       externalId: String(row.externalId),
       url: (row.url as string | null) ?? null,
       want,
-      signal: AbortSignal.timeout(MAX_RUN_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(MAX_RUN_MS)])
+        : AbortSignal.timeout(MAX_RUN_MS),
     });
     const ok = result.status === 'ok' || result.status === 'partial';
     const coverage = json<ItemCoverage>(row.coverage, DEFAULT_COVERAGE);
@@ -2440,13 +2454,61 @@ export function createFeedService(deps: FeedServiceDeps) {
     const current = (await repo('feedAnalyses').findOne({
       filter: { itemId, current: true },
     })) as Row | null;
-    if (current?.gate === 'awaitingMaterial')
-      await analyzeItems(
+    if (current?.gate === 'awaitingMaterial') {
+      const analysis = analyzeItems(
         ownerId,
         [itemId],
         row.sourceId == null ? null : Number(row.sourceId),
       );
+      if (deferAnalysis) void analysis.catch(() => undefined);
+      else await analysis;
+    }
     return result;
+  }
+
+  /**
+   * Fetches parts of one item for a conversation about it ("Ask about this item") and stores them on the item, the way
+   * the person's "Fetch" does, so the next question finds them stored. Only parts the item's platform can give are
+   * asked for; with none left the answer is `unsupported` (or `unconfigured` when only the Collector could give them).
+   * Failures follow the unasked rules: a sign-in, block, rate limit or missing Collector leaves the coverage alone.
+   */
+  async function fetchParts(
+    ownerId: string,
+    itemId: number,
+    want: readonly ('body' | 'comments' | 'transcript')[],
+    signal?: AbortSignal,
+  ): Promise<EnrichResult> {
+    const row = await requireRow('feedItems', ownerId, itemId);
+    const source =
+      row.sourceId == null
+        ? null
+        : ((await repo('feedSources').findOne({
+            filter: { ownerId, id: Number(row.sourceId) },
+          })) as Row | null);
+    const operation = source ? String(source.operation) : null;
+    const allowed = enrichableFor(String(row.platform), operation);
+    const parts = want.filter((part) => allowed.includes(part));
+    if (!parts.length) {
+      const spec = CATALOG.find((entry) => entry.platform === row.platform);
+      const possible = (
+        spec?.operations.find((entry) => entry.operation === operation) ??
+        spec?.operations[0]
+      )?.enrich;
+      const needsCollector =
+        !adapters.collectorConfigured() &&
+        want.some((part) => possible?.includes(part));
+      return {
+        status: needsCollector ? 'unconfigured' : 'unsupported',
+        message: needsCollector ? 'collectorMissing' : 'unsupportedPart',
+        coverage: {},
+      };
+    }
+    return fetchMaterial(ownerId, row, parts, {
+      trigger: 'manual',
+      asked: false,
+      signal,
+      deferAnalysis: true,
+    });
   }
 
   async function enrichItem(
@@ -4177,6 +4239,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     rescoreTerms,
     markAllRead,
     enrichItem,
+    fetchParts,
     prefetchWaiting,
     refreshHeat,
     resolvePublishedTimes,

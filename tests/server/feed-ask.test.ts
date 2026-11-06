@@ -20,7 +20,6 @@ import {
   ASK_QUEUED_NOTICE,
   ASK_THREAD,
   askSystemPrompt,
-  fetchableUrl,
 } from '../../server/providers/feed/ask.js';
 import {
   feedAskToken,
@@ -66,6 +65,10 @@ beforeAll(async () => {
         (message) => message.role === 'tool',
       );
       if (!toolResult) {
+        // A question about the replies reads the discussion; anything else reads the item.
+        const tool = JSON.stringify(parsed.messages?.at(-1)).includes('replies')
+          ? 'feed_read_comments'
+          : 'feed_read_item';
         response.write(chunk({ role: 'assistant', content: '' }));
         response.write(
           chunk({
@@ -74,7 +77,7 @@ beforeAll(async () => {
                 index: 0,
                 id: 'call_read',
                 type: 'function',
-                function: { name: 'feed_read_item', arguments: '{}' },
+                function: { name: tool, arguments: '{}' },
               },
             ],
           }),
@@ -143,7 +146,11 @@ function containerOf(testApp: TestApp) {
 
 async function setUp(
   testApp: TestApp,
-  options: { model?: boolean; runner?: boolean } = {},
+  options: {
+    model?: boolean;
+    runner?: boolean;
+    item?: Record<string, unknown>;
+  } = {},
 ) {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
   const container = containerOf(testApp);
@@ -207,6 +214,7 @@ async function setUp(
       contentVersion: 1,
       fetchedAt: now,
       createdAt: now,
+      ...options.item,
     },
   } as never)) as { record: { id: number } };
   const itemId = Number(record.id);
@@ -320,17 +328,6 @@ test('the context carries the item, its analysis and the interests', () => {
   expect(prompt).toContain('feed_read_item');
 });
 
-test('only public addresses are read for the original page', () => {
-  expect(fetchableUrl('https://example.com/post')).toBe(true);
-  expect(fetchableUrl('http://localhost:3000/')).toBe(false);
-  expect(fetchableUrl('http://127.0.0.1/')).toBe(false);
-  expect(fetchableUrl('http://10.0.0.8/')).toBe(false);
-  expect(fetchableUrl('http://192.168.1.2/')).toBe(false);
-  expect(fetchableUrl('http://[::1]/')).toBe(false);
-  expect(fetchableUrl('file:///etc/passwd')).toBe(false);
-  expect(fetchableUrl('https://user:pw@example.com/')).toBe(false);
-});
-
 test('the online agent answers in a conversation tied to the item, kept and cleared', async ({
   testApp,
 }) => {
@@ -385,6 +382,10 @@ test('the online agent answers in a conversation tied to the item, kept and clea
   const system = JSON.stringify(requests[0]?.messages[0]);
   expect(system).toContain('Show HN: Kopf, a framework for writing operators');
   expect(system).toContain('Ran Kubernetes clusters for years');
+  // It also says what was read and that there is no web search to check outside facts.
+  expect(system).toContain('MATERIAL STATUS');
+  expect(system).toContain('Comments: stored, 1');
+  expect(system).toContain('no web search');
   expect(requests).toHaveLength(2);
 
   // History is kept: opening the item again reads it.
@@ -524,4 +525,53 @@ test('clearing stops a question the runner agent still has', async ({
     conversationId: null,
     runnerPending: false,
   });
+});
+
+test('a discussion that cannot be read comes back with its reason, and the prompt says what is missing', async ({
+  testApp,
+}) => {
+  // An X post: only the Collector reads its replies, and none is configured here.
+  const { admin, itemId } = await setUp(testApp, {
+    item: {
+      platform: 'x',
+      title: 'Kimi K3.1 drops the security data',
+      url: 'https://x.com/someone/status/1',
+      comments: [],
+      coverage: {
+        body: { status: 'available' },
+        comments: { status: 'notRequested' },
+      },
+    },
+  });
+  requests.length = 0;
+  const opened = await admin.fetch(`/feedItems/${itemId}/ask`, json('POST'));
+  expect(opened.status).toBe(200);
+  const { conversationId } = (
+    (await opened.json()) as { data: { conversationId: string } }
+  ).data;
+  const sent = await admin.fetch(
+    `/agents/conversations/${conversationId}/messages`,
+    json('POST', {
+      message: {
+        id: 'ask-replies',
+        role: 'user',
+        parts: [{ type: 'text', text: 'What do the replies say?' }],
+      },
+    }),
+  );
+  expect(sent.status).toBe(200);
+  await sent.text();
+
+  const system = JSON.stringify(requests[0]?.messages[0]);
+  expect(system).toContain('MATERIAL STATUS');
+  expect(system).toContain('Comments: not read');
+  expect(system).toContain('unconfigured');
+  expect(JSON.stringify(requests[0])).toContain('feed_read_comments');
+  // The tool's failure reaches the model as structured fields it can explain.
+  const tool = JSON.stringify(
+    requests[1]?.messages.find((message) => message.role === 'tool'),
+  );
+  expect(tool).toMatch(/\\?"reason\\?":\\?"unconfigured\\?"/);
+  expect(tool).toMatch(/\\?"retryable\\?":false/);
+  expect(tool).toContain('Collector');
 });

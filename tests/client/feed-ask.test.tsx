@@ -185,6 +185,13 @@ describe('ask about an item', () => {
             input: {},
             output: {},
           },
+          {
+            type: 'tool-feed_read_comments',
+            toolCallId: 'y',
+            state: 'output-available',
+            input: {},
+            output: { status: 'unavailable', count: 0, reason: 'needsLogin' },
+          },
           { type: 'text', text: 'A controller for Kubernetes resources.' },
         ],
       },
@@ -212,6 +219,12 @@ describe('ask about an item', () => {
     expect(await screen.findByText('What is an operator?')).toBeVisible();
     expect(
       screen.getByText('A controller for Kubernetes resources.'),
+    ).toBeVisible();
+    // A tool that could not read says why.
+    expect(
+      screen.getByText(
+        'Could not read the discussion: the platform needs a signed-in account',
+      ),
     ).toBeVisible();
     expect(screen.getByText(enUS.feed.ask.tools.readItem)).toBeVisible();
     expect(screen.getByRole('link', { name: 'nolar' })).toHaveAttribute(
