@@ -122,7 +122,7 @@ test('feedback moves the weight of the matched words and can be taken back', asy
   const { data: change } = (await irrelevant.json()) as {
     data: {
       feedback: string;
-      adjustment: { direction: string; terms: string[]; rescored: number };
+      adjustment: { direction: string; terms: string[]; rescoring: boolean };
     };
   };
   expect(change.feedback).toBe('irrelevant');
@@ -130,12 +130,21 @@ test('feedback moves the weight of the matched words and can be taken back', asy
   expect(change.adjustment.terms).toEqual(
     expect.arrayContaining(['agents', 'evaluation']),
   );
-  expect(change.adjustment.rescored).toBeGreaterThan(0);
+  expect(change.adjustment.rescoring).toBe(true);
 
-  const after = (await (await admin.fetch(`/feedItems/${id}`)).json()) as {
+  // The re-score runs in the background job after the response; the item's score follows shortly.
+  let after = { data: { score: before.data.score } } as {
     data: { score: number; analysis: { interestReason: string } };
   };
-  expect(after.data.score).toBeLessThan(before.data.score);
+  await vi.waitFor(
+    async () => {
+      after = (await (await admin.fetch(`/feedItems/${id}`)).json()) as {
+        data: { score: number; analysis: { interestReason: string } };
+      };
+      expect(after.data.score).toBeLessThan(before.data.score);
+    },
+    { timeout: 10_000, interval: 50 },
+  );
   expect(after.data.analysis.interestReason).toMatch(/not relevant/);
   const profile = (await (await admin.fetch('/feedProfile')).json()) as {
     data: { termWeights: Record<string, number> };

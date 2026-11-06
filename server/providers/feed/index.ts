@@ -4,7 +4,7 @@ import { loggingToken } from '@nocobase/app-server/logging';
 import { agentsToken } from '@nocobase/app-plugin-agents/server/tokens';
 import { notificationServiceToken } from '@nocobase/app-plugin-notification/server';
 import { databaseManagerToken } from '@nocobase/db';
-import type { ScheduleExecutor } from '@nocobase/jobs';
+import type { JobExecutor, ScheduleExecutor } from '@nocobase/jobs';
 import {
   createServiceToken,
   ServiceProvider,
@@ -21,6 +21,7 @@ import {
   fetchPageText,
   type FeedAsk,
 } from './ask.js';
+import { createRescoreJob } from './rescore-job.js';
 import { createFeedService, type FeedService } from './service.js';
 
 export type { FeedService } from './service.js';
@@ -44,6 +45,13 @@ export default class FeedProvider extends ServiceProvider<Application> {
   public readonly name: string = 'nocofeed/feed-provider';
 
   private executor: ScheduleExecutor | undefined;
+
+  /** One-off background work: re-scoring after feedback (`rescore-job.ts`). */
+  private jobs: JobExecutor | undefined;
+
+  private readonly RescoreJob = createRescoreJob(() =>
+    this.app.container.resolve(feedServiceToken),
+  );
 
   private unregisterSubject: (() => void) | undefined;
 
@@ -105,6 +113,11 @@ export default class FeedProvider extends ServiceProvider<Application> {
         },
         log: (level, message, context) =>
           logger[level]({ ...context }, message),
+        deferRescore: async (task) => {
+          // Before start() has set the executor up, the service runs the re-score detached itself.
+          if (!this.jobs) throw new Error('The job executor is not set up.');
+          await this.jobs.addJob(new this.RescoreJob(task));
+        },
       });
     });
   }
@@ -140,6 +153,12 @@ export default class FeedProvider extends ServiceProvider<Application> {
 
   public override async start(): Promise<void> {
     if (!this.app.container.has(jobExecutorServiceToken)) return;
+    const jobs = this.app.container
+      .resolve(jobExecutorServiceToken)
+      .getJobExecutor('nocofeed');
+    jobs.registerJob(this.RescoreJob);
+    await jobs.setup();
+    this.jobs = jobs;
     const tick = this.app.config.get<FeedConfig>('feed')?.tickMinutes ?? 5;
     this.executor = this.app.container
       .resolve(jobExecutorServiceToken)
@@ -186,5 +205,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
     this.unregisterSubject?.();
     this.unregisterAsk?.();
     await this.executor?.shutdown();
+    const jobs = this.jobs;
+    this.jobs = undefined;
+    await jobs?.shutdown();
   }
 }
