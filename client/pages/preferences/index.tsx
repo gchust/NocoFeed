@@ -59,6 +59,7 @@ import {
   type Catalog,
   type Profile,
 } from '../feed/types.js';
+import { ReplyGuidelinesCard } from './reply-guidelines.js';
 
 const FORM_ID = 'feed-preferences-form';
 
@@ -111,6 +112,7 @@ export default function PreferencesPage(): ReactElement {
       {result?.profile ? (
         <PreferencesForm key={reloadCount} profile={result.profile} />
       ) : null}
+      {result?.profile ? <ReplyGuidelinesCard key={reloadCount} /> : null}
       {result?.profile ? (
         <LearnedWeights profile={result.profile} onCleared={reload} />
       ) : null}

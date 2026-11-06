@@ -16,6 +16,8 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611080002_feed_read_state.ts` (`feedItemStates.readAt`, see "Read state" below).
   `202611200001_feed_source_options.ts` (`feedSources.options`: a mail subscription's folder and filters, see "Mail
   and push" below).
+  `202611210001_feed_reply_drafts.ts` (`feedReplyDrafts`, `feedProfiles.replyGuidelines`/`replyPlatformGuidelines`,
+  see "Reply drafts" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -119,6 +121,34 @@ Two ways in that are not public platforms (issue #13); both are the person's own
 - **Never HTML.** The material is untrusted, so the model writes Markdown, the server strips tags and any image that is
   not `media:N` of the item, and the client (`client/pages/feed/brief.tsx`) renders without raw HTML, with links as text
   and `media:N` resolved to the item's own image or video cover only.
+
+## Reply drafts
+
+Replies the person can copy to join a discussion (issue #15): `server/providers/feed/replies.ts` (its own service,
+`feedRepliesToken`), `server/routes/feed-replies.ts`, `client/pages/feed/replies.tsx` (the "Join the discussion" card
+under the analysis on the detail) and `client/pages/preferences/reply-guidelines.tsx` (the "Reply style" card).
+
+- **Language of the post, not of the reader.** Drafts are written in the language of the post and its site
+  (`postLanguage` guesses it from the script and tells the model plainly; Xiaohongshu and Bilibili default to Chinese),
+  in the platform's style (`PLATFORM_STYLES`). Only the notes beside each draft (`tone`, `image` idea) follow the
+  interface language. Briefs follow the reading language; do not mix the two.
+- **The person's rules.** `feedProfiles.replyGuidelines` (null = `DEFAULT_REPLY_GUIDELINES` for their interface
+  language, the issue's own text) plus `replyPlatformGuidelines[platform]`, added after the general rules for that
+  platform (`effectiveGuidelines`). They go into the prompt as trusted text; the material stays untrusted.
+  `GET|PUT /feedReplyGuidelines` reads and saves them apart from `/feedProfile`, so other features can add their own
+  rules beside them; saving empty text or a default keeps following the default. Each row keeps `guidelinesVersion`
+  (a hash of the rules it was written with) and the card says when the rules changed since.
+- **When they are written.** `pending()` runs on the `collect-due-sources` tick after the briefs: recent (3 days)
+  `discuss` items, not dismissed, not waiting for their text, with no row yet, `REPLY_PER_TICK` per tick, counted
+  against `dailyLimit` (rows with `trigger: auto` updated today). A failed automatic attempt is not retried until the
+  person asks. Any item gets drafts on demand: `POST /feedItems/:id/replies` answers 202 `pending` and the model writes
+  in the background (one run per item in this process; a pending row older than `PENDING_STALE_MS` counts as failed);
+  the card polls `GET /feedItems/:id/replies`. Asked drafts do not count against the limit. A failure keeps the earlier
+  drafts. At least `MIN_DRAFTS` (3) usable replies, else one retry, else `failed`.
+- **Copy.** Copying never changes the person's marks; the toast offers "Mark as joined", which goes through the mark
+  writer. Drafts render as plain text (tags stripped on the server), never Markdown or HTML; no images are generated.
+- Tests: `tests/server/feed-replies.test.ts` (prompt language, rules, parsing, discuss-only ticks, background requests,
+  limit, owner, routes), `tests/database/feed-reply-drafts-migration.test.ts`, `tests/client/feed-replies.test.tsx`.
 
 ## Topics and subscriptions
 
