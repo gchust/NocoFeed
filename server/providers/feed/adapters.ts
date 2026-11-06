@@ -55,6 +55,8 @@ export function followableUrl(url: string | null | undefined): boolean {
 
 const BODY_LIMIT = 20_000;
 const COMMENT_LIMIT = 20;
+/** A post's RSS is one request whatever its length, so it is read deeper than the JSON listing. */
+const REDDIT_RSS_COMMENT_LIMIT = 100;
 
 export function createAdapters(config: () => FeedConfig): Adapters {
   const http = createHttp(config);
@@ -709,10 +711,18 @@ async function enrichReddit(
 ): Promise<EnrichResult> {
   if (!request.url) throw new AdapterError('unsupported', 'missingUrl');
   const path = new URL(request.url).pathname.replace(/\/$/, '');
-  const [, listing] = await http.json<[RedditListing, RedditListing]>(
-    `https://www.reddit.com${path}.json?limit=${COMMENT_LIMIT}&depth=1&raw_json=1`,
-    request.signal,
-  );
+  let listing: RedditListing | undefined;
+  try {
+    [, listing] = await http.json<[RedditListing, RedditListing]>(
+      `https://www.reddit.com${path}.json?limit=${COMMENT_LIMIT}&depth=1&raw_json=1`,
+      request.signal,
+    );
+  } catch (error) {
+    // Reddit refuses anonymous JSON from many server addresses but still serves the post's own RSS, comments included.
+    if (error instanceof AdapterError && error.status === 'blocked')
+      return enrichRedditFeed(http, path, request);
+    throw error;
+  }
   const children = listing?.data?.children ?? [];
   const comments: CommentEntry[] = children
     .filter((child) => child.kind === 't1')
@@ -732,6 +742,53 @@ async function enrichReddit(
         status: more ? 'partial' : 'available',
         note: `topLevel:${comments.length}`,
         fetchedAt: new Date().toISOString(),
+      },
+    },
+  };
+}
+
+/**
+ * The post and its comments from the post's RSS (`/r/<sub>/comments/<id>/.rss`): the post is the `t3_` entry, each
+ * comment a `t1_` entry. The feed is flat (no depth) and capped by `limit`, so the comments are `partial`.
+ */
+async function enrichRedditFeed(
+  http: Http,
+  path: string,
+  request: EnrichRequest,
+): Promise<EnrichResult> {
+  const post = /^(\/r\/[^/]+\/comments\/[^/]+)/.exec(path)?.[1] ?? path;
+  const entries = parseFeed(
+    await http.text(
+      `https://www.reddit.com${post}/.rss?limit=${REDDIT_RSS_COMMENT_LIMIT}`,
+      request.signal,
+    ),
+  );
+  const comments: CommentEntry[] = entries
+    .filter((entry) => entry.externalId.startsWith('t1_'))
+    .map((entry) => ({
+      author: entry.author?.replace(/^\/u\//, ''),
+      text: truncate(entry.body ?? '', 2_000),
+      depth: 0,
+    }))
+    .filter((comment) => comment.text && comment.text !== '[deleted]');
+  const body = entries
+    .find((entry) => entry.externalId.startsWith('t3_'))
+    ?.body?.replace(/\s*submitted by[\s\S]*$/i, '')
+    .trim();
+  const fetchedAt = new Date().toISOString();
+  return {
+    status: 'ok',
+    message: 'redditRssFallback',
+    ...(request.want.includes('body') && body ? { body } : {}),
+    comments,
+    coverage: {
+      ...(request.want.includes('body') && body
+        ? { body: { status: 'available', note: 'redditRss', fetchedAt } }
+        : {}),
+      comments: {
+        status: comments.length ? 'partial' : 'available',
+        note: comments.length ? 'redditRss' : 'noComments',
+        fetchedAt,
       },
     },
   };

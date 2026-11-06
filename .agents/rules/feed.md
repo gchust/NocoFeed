@@ -300,9 +300,35 @@ The detail has an "Ask about this item" section (`client/pages/feed/ask.tsx`, `s
 - **Context.** `askSystemPrompt` (title, link, brief, body, subtitles, comments, our analysis, the person's interests;
   material marked untrusted) is passed as the trusted `systemPromptTemplate` when NocoFeed creates the session, so it
   is the snapshot of the item at the first question. Scope `nocofeed-ask` (`agentId: 'online'`) replaces the default
-  tools with `feed_read_item` and `feed_read_original`, which find the item through the conversation's own link (never
-  model input) and read it as its owner; `feed_read_original` reads only public http(s) addresses (`fetchableUrl`).
-  `webSearch` is on when the default model's provider supports native search (`models.services.capabilities`).
+  tools with `feed_read_item`, `feed_read_original` and `feed_read_comments`, which find the item through the
+  conversation's own link (never model input) and read it as its owner.
+  `webSearch` is on when the default model's provider supports native search (`models.services.capabilities`); without
+  it (DeepSeek and OpenAI-compatible services today) the prompt tells the model it cannot check outside facts. There is
+  no substitute `web_search` tool: neither NocoFeed nor the Collector has a search backend for the open web.
+- **Material before the first question** (`prepare`). Opening the conversation fetches the parts the item lacks —
+  those its platform's catalog operations list in `enrich` whose coverage is not `available`/`partial` — through the
+  service's `fetchParts` (the same `fetchMaterial` as the person's "Fetch": stored on the item with a `feedRuns`
+  `enrich` row, so the next conversation finds them; unasked failure rules, so a sign-in, block, rate limit or missing
+  Collector leaves the coverage alone). A link-only item whose text is not `available` gets its page read by `page.ts`
+  into the prompt (not stored). It waits at most `ASK_PREPARE_MS` (20 s); a slower fetch goes on in the background and
+  is stored when it lands (`fetchFor` dedupes by owner, item and parts). Nothing here fails the conversation. The prompt's
+  `MATERIAL STATUS` (`describeMaterial`) lists each part as stored, fetched just now, or not read with its reason, and
+  the model is told to say briefly what it could not read and why.
+- **Where the original is read** (`originalRoute`). A link that is the platform's own post (X, Xiaohongshu, Reddit,
+  YouTube, Bilibili, a Hacker News discussion; `PLATFORM_HOSTS`) goes through the adapters or the Collector —
+  `['body', 'comments']`, `['transcript']` for a video, narrowed to what `enrichableFor` allows — and the answer is the
+  item as stored afterwards. Any other link is a web page read by `readPageText` (`page.ts`: public addresses only,
+  every redirect checked). `feed_read_comments` fetches the discussion unless comments were read in the last 30 minutes.
+- **Failures are structured** (`ReadFailure`: `reason` — `needsLogin`, `blocked`, `rateLimited`, `timeout`,
+  `unconfigured`, `unsupported`, `notFound`, `notPublic`, `noLink`, `failed` — plus `retryable`, `detail` and an
+  `explanation` for the model). Tool answers carry `status` (`ok`, `stored` when only what was stored before could be
+  given, `unavailable`), `via` (`native`, `collector`, `page`) and `failure`; the public output (`url`, `status`,
+  `reason`, `count`) lets the page say "Could not read the discussion: …" (`feed.ask.tools.reasons`).
+- **Reddit from a server.** Reddit answers its JSON with 403 to many server addresses (the 252 deployment included,
+  through its proxy) but serves a post's RSS (`/r/<sub>/comments/<id>/.rss?limit=100`): `enrichReddit` falls back to it
+  (`enrichRedditFeed`) — the post is the `t3_` entry, each comment a `t1_` entry, flat (`depth: 0`), so comments are
+  `partial` with note `redditRss`. Reddit rate-limits that feed quickly (429 → `rateLimited`, retryable). The
+  Collector does not read Reddit.
 - **Runner.** With a workable `readerAgentId`, "Ask … to dig deeper" queues a run on the `feedItem` subject in thread
   `ask` (`ASK_THREAD`, trigger `ask`; `feedItemSubject` dispatches the claim's assembly and `onRunFinished` by thread).
   The question is delivered into the conversation as a `news` notice `nocofeed.askQueued`; when the run ends its
@@ -312,8 +338,11 @@ The detail has an "Ask about this item" section (`client/pages/feed/ask.tsx`, `s
   runner path also needs the model, because the conversation it answers into is a native session.
 - Answers render as Markdown without raw HTML or images; links open in a new tab with `noopener noreferrer`.
 - Tests: `tests/server/feed-ask.test.ts` (sessions, other owner's 404, unconfigured, context, a fake OpenAI-compatible
-  model calling `feed_read_item` through the real chat route, persistence and clearing, runner queue/assembly/answer)
-  and `tests/client/feed-ask.test.tsx`.
+  model calling `feed_read_item` — and `feed_read_comments` on an X post without a Collector, whose structured failure
+  reaches the model — through the real chat route, persistence and clearing, runner queue/assembly/answer),
+  `tests/server/feed-ask-material.test.ts` (routing by platform, failures, preparation with its deadline and failures,
+  the page of a link-only item, the Reddit RSS fallback, comments stored and not fetched again) and
+  `tests/client/feed-ask.test.tsx`.
 
 ## Tests
 

@@ -10,6 +10,7 @@ import {
   BotIcon,
   GlobeIcon,
   MessageCircleQuestionIcon,
+  MessagesSquareIcon,
   SearchIcon,
   SendIcon,
   SquareIcon,
@@ -157,13 +158,44 @@ function ToolLine({ part }: { readonly part: Part }): ReactElement | null {
         {t('feed.ask.tools.readItem')}
       </p>
     );
-  if (part.type === 'tool-feed_read_original')
+  if (
+    part.type === 'tool-feed_read_original' ||
+    part.type === 'tool-feed_read_comments'
+  ) {
+    const comments = part.type === 'tool-feed_read_comments';
+    const Icon = comments ? MessagesSquareIcon : GlobeIcon;
+    // The public output says whether it was read and, when not, why (`server/providers/feed/ask.ts`).
+    const output = (done ? (part as { output?: unknown }).output : null) as {
+      status?: unknown;
+      reason?: unknown;
+      count?: unknown;
+    } | null;
+    const reason =
+      output && output.status !== 'ok' && typeof output.reason === 'string'
+        ? output.reason
+        : null;
     return (
       <p className='flex items-center gap-1.5 text-xs text-muted-foreground'>
-        <GlobeIcon className='size-3.5' aria-hidden />
-        {t('feed.ask.tools.readOriginal')}
+        <Icon className='size-3.5' aria-hidden />
+        {reason
+          ? t(
+              comments
+                ? 'feed.ask.tools.readCommentsFailed'
+                : 'feed.ask.tools.readOriginalFailed',
+              {
+                reason: t(`feed.ask.tools.reasons.${reason}`, {
+                  defaultValue: t('feed.ask.tools.reasons.failed'),
+                }),
+              },
+            )
+          : comments
+            ? t('feed.ask.tools.readComments', {
+                count: typeof output?.count === 'number' ? output.count : 0,
+              })
+            : t('feed.ask.tools.readOriginal')}
       </p>
     );
+  }
   if (part.type === 'tool-webSearch') {
     const sources = done
       ? searchSources((part as { output?: unknown }).output)
