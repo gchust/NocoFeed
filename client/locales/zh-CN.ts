@@ -39,7 +39,7 @@ const zhCN: AppResource = {
   },
   agents: {
     subjects: { feedItem: '信息条目' },
-    triggers: { analyze: '重新分析' },
+    triggers: { analyze: '重新分析', ask: '追问条目' },
     pages: { runtimeConnect: '添加运行环境' },
   },
   app: { ...systemZhCN.app, title: 'NocoFeed' },
@@ -353,6 +353,44 @@ const zhCN: AppResource = {
       translateFailed: '翻译失败：没有可用的 AI 模型，或模型没有给出回答。',
       showOriginal: '显示原文',
       showTranslation: '显示译文',
+    },
+    // 详情里的“追问”（`ask.tsx`、`server/providers/feed/ask.ts`）。
+    ask: {
+      title: '追问',
+      hint: '没看懂？可以问问这条信息到底在讲什么，或者里面提到的某个系统、名词是干嘛的。',
+      placeholder: '输入问题，例如“这个系统是干嘛的？”',
+      send: '提问',
+      stop: '停止',
+      thinking: '思考中…',
+      failed: '回答没有完成，请再问一次。',
+      webSearch: '智能体可以联网搜索，并会附上引用的网页链接。',
+      clear: '清空对话',
+      clearTitle: '清空这段对话？',
+      clearDescription:
+        '关于这条信息的问答会被删除；Runner 智能体还在处理的问题会被停止。',
+      cleared: '对话已清空',
+      tools: {
+        readItem: '读取了条目内容',
+        readOriginal: '读取了原文页面',
+        searching: '正在联网搜索…',
+        searched: '联网搜索过',
+      },
+      runner: {
+        generic: 'Runner 智能体',
+        action: '交给 {{agent}} 深入查',
+        asked: '交给了 {{agent}}',
+        answered: '{{agent}} 的回答',
+        pending: '{{agent}} 正在查，完成后回答会出现在这里。',
+        failed: 'Runner 智能体这次没能回答。',
+        busy: '{{agent}} 还在处理上一个问题。',
+      },
+      unavailable: {
+        title: '还没有可以回答的智能体',
+        description:
+          '追问需要在“系统设置 → AI 模型”里配置聊天模型；想交给 Runner 智能体深入查，请在“兴趣与能力”里选择一个智能体。',
+        models: '配置 AI 模型',
+        preferences: '兴趣与能力',
+      },
     },
     detail: {
       label: '内容详情',

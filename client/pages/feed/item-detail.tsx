@@ -43,6 +43,7 @@ import { Spinner } from '#components/ui/spinner';
 import { Textarea } from '#components/ui/textarea';
 import { cn } from 'cn';
 
+import { AskSection } from './ask.js';
 import { BriefMarkdown } from './brief.js';
 import { ArticleText, MediaGallery } from './content.js';
 import { noteText, relativeTime, requestProblem } from './format.js';
@@ -924,6 +925,10 @@ export function ItemDetail({
           {item.transcript.map((segment) => segment.text).join('\n')}
         </TextBlock>
       ) : null}
+
+      <Separator />
+
+      <AskSection key={item.id} itemId={item.id} />
 
       <Separator />
 

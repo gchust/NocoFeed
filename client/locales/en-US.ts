@@ -48,7 +48,7 @@ const enUS = {
   // What the Agents plugin's pages call NocoFeed's subject and why its runs start (`agent-reader.ts`).
   agents: {
     subjects: { feedItem: 'Feed item' },
-    triggers: { analyze: 'Analyse again' },
+    triggers: { analyze: 'Analyse again', ask: 'Question about the item' },
     pages: { runtimeConnect: 'Add runtime' },
   },
   app: { ...systemEnUS.app, title: 'NocoFeed' },
@@ -375,6 +375,45 @@ const enUS = {
         'No translation: no AI model is available, or it gave no answer.',
       showOriginal: 'Show original',
       showTranslation: 'Show translation',
+    },
+    // "Ask about this item" on the detail (`ask.tsx`, `server/providers/feed/ask.ts`).
+    ask: {
+      title: 'Ask about this item',
+      hint: 'Did not quite get it? Ask what the item is about, or what a system or term it mentions is.',
+      placeholder: 'Ask a question, such as "What is this system for?"',
+      send: 'Ask',
+      stop: 'Stop',
+      thinking: 'Thinking…',
+      failed: 'The answer could not be completed. Ask again.',
+      webSearch: 'The agent can search the web and cites the pages it used.',
+      clear: 'Clear conversation',
+      clearTitle: 'Clear this conversation?',
+      clearDescription:
+        'The questions and answers about this item are deleted. A question the runner agent is still working on is stopped.',
+      cleared: 'Conversation cleared',
+      tools: {
+        readItem: 'Read the item',
+        readOriginal: 'Read the original page',
+        searching: 'Searching the web…',
+        searched: 'Searched the web',
+      },
+      runner: {
+        generic: 'runner agent',
+        action: 'Ask {{agent}} to dig deeper',
+        asked: 'Asked {{agent}}',
+        answered: '{{agent}} answered',
+        pending:
+          '{{agent}} is looking into it. The answer appears here when it is done.',
+        failed: 'The runner agent could not answer this time.',
+        busy: '{{agent}} is still working on the previous question.',
+      },
+      unavailable: {
+        title: 'No agent to answer yet',
+        description:
+          'Asking about an item needs a chat model under System settings → AI models. To hand questions to a runner agent, choose one under Interests & skills.',
+        models: 'Set up AI models',
+        preferences: 'Interests & skills',
+      },
     },
     detail: {
       label: 'Item details',

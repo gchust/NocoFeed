@@ -14,13 +14,25 @@ import {
 import type { FeedConfig } from '../../config/feed.js';
 import { createAdapters } from './adapters.js';
 import { feedItemSubject } from './agent-reader.js';
+import {
+  ASK_THREAD,
+  ASK_TRIGGER,
+  createFeedAsk,
+  fetchPageText,
+  type FeedAsk,
+} from './ask.js';
 import { createFeedService, type FeedService } from './service.js';
 
 export type { FeedService } from './service.js';
+export type { FeedAsk } from './ask.js';
 export { FeedError } from './service.js';
 
 export const feedServiceToken: ServiceToken<FeedService> =
   createServiceToken<FeedService>('nocofeed/feed-service');
+
+/** Questions about one item (`ask.ts`): the online agent's conversation and the runner agent's deeper look. */
+export const feedAskToken: ServiceToken<FeedAsk> =
+  createServiceToken<FeedAsk>('nocofeed/feed-ask');
 
 /**
  * Binds the feed service and runs the subscription schedule: every few minutes it collects the subscriptions whose own
@@ -35,7 +47,28 @@ export default class FeedProvider extends ServiceProvider<Application> {
 
   private unregisterSubject: (() => void) | undefined;
 
+  private unregisterAsk: (() => void) | undefined;
+
   public override register(): void {
+    this.app.container.singleton(feedAskToken, () => {
+      const config = () => this.app.config.get<FeedConfig>('feed')!;
+      const logger = this.app.container
+        .resolve(loggingToken)
+        .getLogger('nocofeed');
+      const feed = () => this.app.container.resolve(feedServiceToken);
+      return createFeedAsk({
+        agents: () =>
+          this.app.container.has(agentsToken)
+            ? this.app.container.resolve(agentsToken)
+            : undefined,
+        getItem: (ownerId, id) => feed().getItem(ownerId, id),
+        getProfile: (ownerId) => feed().getProfile(ownerId),
+        readPage: (url, signal) =>
+          fetchPageText(url, signal, config().userAgent),
+        log: (level, message, context) =>
+          logger[level]({ ...context }, message),
+      });
+    });
     this.app.container.singleton(feedServiceToken, () => {
       const config = () => this.app.config.get<FeedConfig>('feed')!;
       const logger = this.app.container
@@ -92,7 +125,17 @@ export default class FeedProvider extends ServiceProvider<Application> {
           .catch(() => undefined);
       }, 1_000).unref();
     };
-    this.unregisterSubject = agents.subjects.register(feedItemSubject(settle));
+    const ask = this.app.container.resolve(feedAskToken);
+    // The tools, the scope and the `feedItem` link kind of "Ask about this item".
+    this.unregisterAsk = ask.register(agents);
+    this.unregisterSubject = agents.subjects.register(
+      feedItemSubject(settle, {
+        thread: ASK_THREAD,
+        trigger: ASK_TRIGGER,
+        assemble: (conn, claim) => ask.assembleAsk(conn, claim),
+        onRunFinished: (tx, run) => ask.onAskFinished(tx, run),
+      }),
+    );
   }
 
   public override async start(): Promise<void> {
@@ -141,6 +184,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
 
   public override async shutdown(): Promise<void> {
     this.unregisterSubject?.();
+    this.unregisterAsk?.();
     await this.executor?.shutdown();
   }
 }

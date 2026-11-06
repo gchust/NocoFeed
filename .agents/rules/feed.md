@@ -240,6 +240,37 @@ runtime someone connects, which can open pages themselves. NocoFeed hands one ta
 - Candidates not moved yet: topic searches on login-bound platforms (today the Collector) and the prefilter/batch
   analysis, which stay on the model gateway because they run unattended in bulk.
 
+## Ask about an item
+
+The detail has an "Ask about this item" section (`client/pages/feed/ask.tsx`, `server/providers/feed/ask.ts`,
+`server/routes/feed-ask.ts`): a conversation per person and item about what the item says and what it mentions.
+
+- **No table of ours.** The Agents plugin keeps the conversation (OnlineAgent native session, hidden from its chat
+  list); NocoFeed ties it to the item with a `feedItem` conversation link (`conversations.links.registerKind`, resolved
+  to the owner's items only). "The person's conversation about an item" is `links.linkedTo` filtered by owner, newest.
+- **Routes.** `GET|POST|DELETE /feedItems/:id/ask` (state; open, which creates the session on the first question;
+  clear, which deletes the conversations and cancels open runner questions) and `POST /feedItems/:id/ask/runner`. They
+  need a session plus the authorization middleware (the session's `OnlineAgentContext`), and another person's item is a
+  `404`. Messages, streaming, history and Stop go to the plugin's own `/api/agents/conversations/:id/…` routes through
+  `ChatApi` (`@nocobase/app-plugin-agents/client/chat`) and `useChat` from `@ai-sdk/react`; the plugin checks ownership.
+- **Context.** `askSystemPrompt` (title, link, brief, body, subtitles, comments, our analysis, the person's interests;
+  material marked untrusted) is passed as the trusted `systemPromptTemplate` when NocoFeed creates the session, so it
+  is the snapshot of the item at the first question. Scope `nocofeed-ask` (`agentId: 'online'`) replaces the default
+  tools with `feed_read_item` and `feed_read_original`, which find the item through the conversation's own link (never
+  model input) and read it as its owner; `feed_read_original` reads only public http(s) addresses (`fetchableUrl`).
+  `webSearch` is on when the default model's provider supports native search (`models.services.capabilities`).
+- **Runner.** With a workable `readerAgentId`, "Ask … to dig deeper" queues a run on the `feedItem` subject in thread
+  `ask` (`ASK_THREAD`, trigger `ask`; `feedItemSubject` dispatches the claim's assembly and `onRunFinished` by thread).
+  The question is delivered into the conversation as a `news` notice `nocofeed.askQueued`; when the run ends its
+  summary arrives as `nocofeed.askAnswer` (`conversations.deliver` in the run's transaction). One open runner question
+  per item (`409`); the page polls while `runnerPending`. The native model does not see runner answers in later turns.
+- **Unconfigured.** Without a chat model the section shows a notice linking to `/settings/models` and Preferences; the
+  runner path also needs the model, because the conversation it answers into is a native session.
+- Answers render as Markdown without raw HTML or images; links open in a new tab with `noopener noreferrer`.
+- Tests: `tests/server/feed-ask.test.ts` (sessions, other owner's 404, unconfigured, context, a fake OpenAI-compatible
+  model calling `feed_read_item` through the real chat route, persistence and clearing, runner queue/assembly/answer)
+  and `tests/client/feed-ask.test.tsx`.
+
 ## Tests
 
 `tests/database/feed-migration.test.ts` and `feed-engagement-migration.test.ts`, `tests/server/feed-routes.test.ts`

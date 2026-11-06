@@ -154,19 +154,48 @@ export async function recordAgentResult(
   return updatedCount > 0;
 }
 
+/**
+ * Questions about an item handed to a runner agent (`ask.ts`): runs on the same subject in thread `ask`, with their own
+ * brief and their own ending.
+ */
+export interface AskHandlers {
+  readonly thread: string;
+  readonly trigger: string;
+  readonly assemble: (
+    conn: DatabaseConnection,
+    claim: ClaimContext,
+  ) => Promise<SubjectAssembly>;
+  readonly onRunFinished: NonNullable<
+    NonNullable<SubjectBinding['sink']>['onRunFinished']
+  >;
+}
+
 /** The `feedItem` subject. `onFinished` is told after a result was recorded, to settle it once the transaction ends. */
-export function feedItemSubject(onFinished: () => void): SubjectBinding {
+export function feedItemSubject(
+  onFinished: () => void,
+  ask?: AskHandlers,
+): SubjectBinding {
   return {
     kind: FEED_ITEM_SUBJECT,
     // An item, its analysis and the person's interests are theirs alone, like the rest of NocoFeed.
     private: true,
     title: { key: 'agents.subjects.feedItem', ns: NS },
     path: '/?item={id}',
-    triggers: { [ANALYZE_TRIGGER]: { key: 'agents.triggers.analyze', ns: NS } },
+    triggers: {
+      [ANALYZE_TRIGGER]: { key: 'agents.triggers.analyze', ns: NS },
+      ...(ask ? { [ask.trigger]: { key: 'agents.triggers.ask', ns: NS } } : {}),
+    },
     queuedExpiryMs: AGENT_QUEUE_EXPIRY_MS,
-    context: { assemble: assembleAnalysis },
+    context: {
+      assemble: (conn, claim) =>
+        ask && claim.run.threadScope === ask.thread
+          ? ask.assemble(conn, claim)
+          : assembleAnalysis(conn, claim),
+    },
     sink: {
       onRunFinished: async (tx, run) => {
+        if (ask && run.threadScope === ask.thread)
+          return ask.onRunFinished(tx, run);
         if (await recordAgentResult(tx.conn, run)) onFinished();
       },
     },
