@@ -54,6 +54,7 @@ import { Textarea } from '#components/ui/textarea';
 
 import { requestProblem } from '../feed/format.js';
 import { LoadProblem } from '../feed/parts.js';
+import { IdeaSettingsCard } from './ideas.js';
 import {
   READING_LANGUAGES,
   type Catalog,
@@ -116,6 +117,7 @@ export default function PreferencesPage(): ReactElement {
       {result?.profile ? (
         <LearnedWeights profile={result.profile} onCleared={reload} />
       ) : null}
+      {result?.profile ? <IdeaSettingsCard key={reloadCount} /> : null}
     </PageContainer>
   );
 }

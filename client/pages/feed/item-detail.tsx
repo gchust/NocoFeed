@@ -46,6 +46,7 @@ import { cn } from 'cn';
 import { AskSection } from './ask.js';
 import { BriefMarkdown } from './brief.js';
 import { ArticleText, MediaGallery } from './content.js';
+import { IdeasSection } from './ideas.js';
 import { noteText, relativeTime, requestProblem } from './format.js';
 import { ItemTime, LoadProblem, PlatformBadge, VerdictBadge } from './parts.js';
 import { ReplyDrafts } from './replies.js';
@@ -917,6 +918,10 @@ export function ItemDetail({
       <Separator />
 
       <AskSection key={item.id} itemId={item.id} />
+
+      <Separator />
+
+      <IdeasSection key={item.id} itemId={item.id} />
 
       <Separator />
 
