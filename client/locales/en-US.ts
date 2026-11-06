@@ -145,6 +145,7 @@ const enUS = {
       participated: 'Joined',
       dismissed: 'Dismiss',
       unread: 'Mark unread',
+      saveFailed: 'The change could not be saved and has been undone',
     },
     feedback: {
       helpful: 'Useful',
@@ -152,7 +153,7 @@ const enUS = {
       adjustedDown: 'Ranking adjusted: similar items will rank lower',
       adjustedUp: 'Ranking adjusted: similar items will rank higher',
       adjustedDetail:
-        'Words weighed: {{terms}}. Recent items re-scored: {{count}}.',
+        'Words weighed: {{terms}}. Recent items are being re-scored in the background.',
     },
     digest: {
       title: 'Today’s digest',

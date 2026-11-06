@@ -205,8 +205,11 @@ export interface StateChange extends ItemState {
   adjustment?: {
     direction: 'up' | 'down';
     terms: string[];
-    /** How many recent items were scored again with the new weights. */
-    rescored: number;
+    /**
+     * Recent rule-based analyses mentioning the terms are scored again with the new weights after the response, in a
+     * background job; the list shows the new scores on its next load.
+     */
+    rescoring: boolean;
   };
 }
 
@@ -582,6 +585,9 @@ const MAX_SEARCH_TERMS = 10;
 /** Items asked about in one prefilter call. */
 const PREFILTER_BATCH = 20;
 const RESCORE_LIMIT = 200;
+/** Lets pending I/O (incoming requests) run before the next step of long background work. */
+const yieldToRequests = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve));
 /** Statuses that a person has to fix in configuration, already shown on the subscription; not counted as failures. */
 const SETUP_STATUSES = new Set(['unconfigured', 'unsupported']);
 
@@ -658,7 +664,24 @@ export interface FeedServiceDeps {
     message: string,
     context?: Row,
   ) => void;
+  /**
+   * Hands re-scoring after feedback to a background job (`RescoreJob`), so the request answers without waiting for it.
+   * Resolves once the job is accepted; rejects when it cannot be, and the service then runs it detached itself.
+   * Without it (tests that build the service alone) the service always runs it detached.
+   */
+  deferRescore?: (task: RescoreTask) => Promise<void>;
 }
+
+/** What a background re-score needs: whose analyses, and the words whose weight changed. */
+export interface RescoreTask {
+  ownerId: string;
+  terms: string[];
+}
+
+/** Runs the writes of one state change in a transaction; the route supplies one that also keeps an operation receipt. */
+export type StateWriter = <T>(
+  write: (connection: Connection) => Promise<T>,
+) => Promise<T>;
 
 export type FeedService = ReturnType<typeof createFeedService>;
 
@@ -3423,6 +3446,12 @@ export function createFeedService(deps: FeedServiceDeps) {
     };
   }
 
+  /**
+   * Saves the person's marks. Reads come first, then every write runs in one transaction (`inTransaction`, which the
+   * route wraps in an operation receipt), so a retried request never applies feedback twice. Feedback moves the word
+   * weights inside that transaction; re-scoring the recent analyses is slow (hundreds of rows) and runs afterwards in a
+   * background job, so the request stays fast.
+   */
   async function updateState(
     ownerId: string,
     itemId: number,
@@ -3432,6 +3461,7 @@ export function createFeedService(deps: FeedServiceDeps) {
         followUpSeen: boolean;
       }
     >,
+    inTransaction: StateWriter = (write) => database.transaction(write),
   ): Promise<StateChange> {
     const item = await requireRow('feedItems', ownerId, itemId);
     const before = (await repo('feedItemStates').findOne({
@@ -3473,27 +3503,34 @@ export function createFeedService(deps: FeedServiceDeps) {
       values.followUpNew = 0;
       values.followUpBaseline = before?.followUpReplies ?? null;
     }
-    await repo('feedItemStates').upsertOne({
-      filter: { ownerId, itemId },
-      create: { ownerId, itemId, ...values },
-      update: values,
-    } as never);
+    const learning =
+      input.feedback === undefined
+        ? undefined
+        : await planFeedback(
+            ownerId,
+            item,
+            (before?.feedback as ItemState['feedback']) ?? null,
+            input.feedback,
+          );
 
-    let adjustment: StateChange['adjustment'];
-    if (input.feedback !== undefined) {
-      adjustment = await learnFromFeedback(
-        ownerId,
-        item,
-        (before?.feedback as ItemState['feedback']) ?? null,
-        input.feedback,
-      );
-    }
-    const state = toState(
-      (await repo('feedItemStates').findOne({
+    const change = await inTransaction<StateChange>(async (connection) => {
+      await connection.repository('feedItemStates').upsertOne({
         filter: { ownerId, itemId },
-      })) as Row | null,
-    );
-    return adjustment ? { ...state, adjustment } : state;
+        create: { ownerId, itemId, ...values },
+        update: values,
+      } as never);
+      if (learning) await learning.save(connection);
+      const state = toState(
+        (await connection.repository('feedItemStates').findOne({
+          filter: { ownerId, itemId },
+        })) as Row | null,
+      );
+      return learning ? { ...state, adjustment: learning.adjustment } : state;
+    });
+    // After the commit, so the job reads the new weights. A replayed request schedules it again, which is harmless.
+    if (change.adjustment)
+      await scheduleRescore(ownerId, change.adjustment.terms);
+    return change;
   }
 
   /**
@@ -3555,14 +3592,21 @@ export function createFeedService(deps: FeedServiceDeps) {
   /**
    * Feedback moves the weight of the words that made the item match: "useful" up by one, "not relevant" down by one,
    * within bounds. Changing or withdrawing feedback undoes the earlier step, so clicking back and forth never drifts.
-   * Recent rule-based analyses are scored again so the feed reflects it at once; model analyses pick it up next time.
+   * Answers the new weights to save with the state; the recent rule-based analyses are scored again afterwards
+   * (`scheduleRescore`), model analyses pick the weights up next time.
    */
-  async function learnFromFeedback(
+  async function planFeedback(
     ownerId: string,
     item: Row,
     previous: ItemState['feedback'],
     next: ItemState['feedback'],
-  ): Promise<StateChange['adjustment']> {
+  ): Promise<
+    | {
+        adjustment: NonNullable<StateChange['adjustment']>;
+        save: (connection: Connection) => Promise<void>;
+      }
+    | undefined
+  > {
     const value = (feedback: ItemState['feedback']) =>
       feedback === 'helpful' ? 1 : feedback === 'irrelevant' ? -1 : 0;
     const delta = value(next) - value(previous);
@@ -3586,19 +3630,67 @@ export function createFeedService(deps: FeedServiceDeps) {
       if (weight) weights[term] = weight;
       else delete weights[term];
     }
-    await repo('feedProfiles').upsertOne({
-      filter: { ownerId },
-      create: {
-        ownerId,
-        dailyLimit: profile.dailyLimit,
-        keepLearning: profile.keepLearning,
-        termWeights: weights,
-        updatedAt: new Date(),
+    return {
+      adjustment: {
+        direction: delta > 0 ? 'up' : 'down',
+        terms: hits,
+        rescoring: true,
       },
-      update: { termWeights: weights, updatedAt: new Date() },
-    } as never);
-    const rescored = await rescoreWithRules(ownerId, hits);
-    return { direction: delta > 0 ? 'up' : 'down', terms: hits, rescored };
+      save: async (connection) => {
+        await connection.repository('feedProfiles').upsertOne({
+          filter: { ownerId },
+          create: {
+            ownerId,
+            dailyLimit: profile.dailyLimit,
+            keepLearning: profile.keepLearning,
+            termWeights: weights,
+            updatedAt: new Date(),
+          },
+          update: { termWeights: weights, updatedAt: new Date() },
+        } as never);
+      },
+    };
+  }
+
+  /** Hands the re-score to the background job; when it cannot be queued, runs it detached here. Never waits for it. */
+  async function scheduleRescore(
+    ownerId: string,
+    terms: string[],
+  ): Promise<void> {
+    if (deps.deferRescore) {
+      try {
+        await deps.deferRescore({ ownerId, terms });
+        return;
+      } catch (error) {
+        deps.log('warn', 'could not queue the re-score; running it here', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    void rescoreTerms(ownerId, terms).catch((error: unknown) =>
+      deps.log('warn', 're-score after feedback failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+
+  /**
+   * One person's re-scores run one after another: each replaces the current analyses it changes, so two at once could
+   * leave an item with two current analyses. Each reads the weights when it starts, so the last one leaves the scores
+   * of the latest weights.
+   */
+  const rescoreQueues = new Map<string, Promise<unknown>>();
+  function rescoreTerms(ownerId: string, terms: string[]): Promise<number> {
+    const previous = rescoreQueues.get(ownerId) ?? Promise.resolve();
+    const run = previous
+      .catch(() => undefined)
+      .then(() => rescoreWithRules(ownerId, terms));
+    const tail = run.catch(() => undefined);
+    rescoreQueues.set(ownerId, tail);
+    void tail.then(() => {
+      if (rescoreQueues.get(ownerId) === tail) rescoreQueues.delete(ownerId);
+    });
+    return run;
   }
 
   /** Scores the recent rule-based analyses that mention any of `terms` again; never spends model budget. */
@@ -3627,6 +3719,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     const topicCache = new Map<string, AnalysisTopic[]>();
     let count = 0;
     for (const row of rows) {
+      // SQLite answers synchronously, so without a pause this loop never lets a waiting request in: a person who keeps
+      // clicking would wait for all of it. One macrotask per item lets requests go first.
+      await yieldToRequests();
       const analysisItem = toAnalysisItem(row);
       const haystack =
         `${analysisItem.title} ${analysisItem.summary ?? ''} ${analysisItem.body ?? ''}`.toLowerCase();
@@ -4012,6 +4107,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     listItems,
     getItem,
     updateState,
+    rescoreTerms,
     markAllRead,
     enrichItem,
     prefetchWaiting,

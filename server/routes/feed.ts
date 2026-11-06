@@ -11,9 +11,11 @@ import {
   defineApiRoutes,
   describeRoute,
   emptyResponse,
+  executeIdempotentMutation,
   listResponse,
   type AppApiRouteContribution,
 } from '@nocobase/app-server/router';
+import { databaseManagerToken } from '@nocobase/db';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
@@ -51,6 +53,10 @@ import {
  * business data here, so a per-record ownership check is the whole authorization model.
  */
 const DOMAIN = 'nocofeed';
+/** The operation key the client's submission controller sends with a change of the person's marks. */
+const StateHeaders = z.object({
+  'idempotency-key': z.string().optional(),
+});
 const errors = {
   '401': apiErrorResponse(401),
   '404': apiErrorResponse(404),
@@ -503,20 +509,47 @@ export const feedRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         summary:
           'Update my read, favourite, read-later, dismissal, feedback, notes or participation record',
         description:
-          'Feedback moves the weight of the words that matched the item and scores recent items again. A Hacker News or Reddit participation link is followed for new replies.',
+          'Feedback moves the weight of the words that matched the item; recent items are scored again in the background after the response. A Hacker News or Reddit participation link is followed for new replies. With an `Idempotency-Key` the change is applied once: a retry with the same key answers the first result.',
         operationId: 'updateFeedItemState',
         responses: { '200': dataResponse(FeedStateChangeSchema), ...errors },
       }),
       apiValidator('param', IdParams),
+      apiValidator('header', StateHeaders),
       apiValidator('json', UpdateStateBody),
       async (context) => {
+        const ownerId = ownerOf(context);
+        const id = context.req.valid('param').id;
+        const input = context.req.valid('json');
+        const key = context.req.valid('header')['idempotency-key'];
+        let replayed = false;
         const data = await guard(() =>
           feed().updateState(
-            ownerOf(context),
-            context.req.valid('param').id,
-            context.req.valid('json'),
+            ownerId,
+            id,
+            input,
+            key
+              ? async (write) => {
+                  // The service has already found the item among the caller's own (a 404 otherwise), before this
+                  // runs, on a first attempt and a replay alike; the session is the only other permission.
+                  const result = await executeIdempotentMutation({
+                    connection: app.container
+                      .resolve(databaseManagerToken)
+                      .connection(),
+                    key,
+                    principal: `${app.appName}:${ownerId}`,
+                    operation: `feedItems/${id}/state`,
+                    input,
+                    authorize: () => undefined,
+                    authorizeReplay: () => undefined,
+                    execute: write,
+                  });
+                  replayed = result.replayed;
+                  return result.data;
+                }
+              : undefined,
           ),
         );
+        if (key) context.header('Idempotency-Replayed', String(replayed));
         return context.json({ data });
       },
     );

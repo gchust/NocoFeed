@@ -456,7 +456,10 @@ export const FeedStateChangeSchema = FeedItemStateSchema.extend({
     .object({
       direction: z.enum(['up', 'down']),
       terms: z.array(z.string()),
-      rescored: z.number().int(),
+      rescoring: z.boolean().meta({
+        description:
+          'Recent rule-based analyses mentioning the words are scored again in the background after this response',
+      }),
     })
     .optional()
     .meta({

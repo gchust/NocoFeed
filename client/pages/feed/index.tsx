@@ -24,6 +24,7 @@ import {
   type ReactElement,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -64,6 +65,7 @@ import { DigestPanel } from './digest.js';
 import { type Density, FeedCard } from './feed-card.js';
 import { requestProblem } from './format.js';
 import { ItemDetail } from './item-detail.js';
+import { countsAfter, type Marks, useMarkWriter } from './use-item-state.js';
 import { LoadProblem } from './parts.js';
 import { ShortcutHelp } from './shortcuts.js';
 import { type ShortcutAction, useFeedShortcuts } from './use-feed-shortcuts.js';
@@ -278,9 +280,16 @@ export default function FeedPage(): ReactElement {
     return () => controller.abort();
   }, [api, reloadCount]);
 
+  // Items dismissed from a feed view leave it at once; undoing it puts them back where they were.
+  const [hidden, setHidden] = useState<ReadonlySet<number>>(() => new Set());
+  const feedView = ['all', 'hot', 'solid', 'discuss', 'learn'].includes(view);
   const loading = view !== 'digest' && list?.key !== requestKey;
   const sameFilter = list?.key.startsWith(`${filterKey}:`) ?? false;
-  const items = sameFilter ? list?.items : undefined;
+  const items = sameFilter
+    ? feedView && hidden.size
+      ? list?.items?.filter((item) => !hidden.has(item.id))
+      : list?.items
+    : undefined;
   const error = loading ? undefined : list?.error;
 
   const loadMore = (): void => {
@@ -328,35 +337,100 @@ export default function FeedPage(): ReactElement {
       );
   };
 
-  // A change made in the detail shows on the card at once, and the counts follow.
+  // Notes and the participation record saved in the detail show on the card, and the counts follow quietly.
   const onStateChange = (id: number, state: ItemState): void => {
     setCountsVersion((count) => count + 1);
-    setReadOverrides((current) => ({
-      version: reloadCount,
-      read: new Map(
-        current.version === reloadCount ? current.read : undefined,
-      ).set(id, state.read),
-    }));
     setList((current) =>
       current?.items
         ? {
             ...current,
             items: current.items.map((item) =>
               item.id === id
-                ? {
-                    ...item,
-                    favorite: state.favorite,
-                    later: state.later,
-                    participated: state.participated,
-                    read: state.read,
-                    newReplies: state.followUp?.newReplies ?? 0,
-                  }
+                ? { ...item, newReplies: state.followUp?.newReplies ?? 0 }
                 : item,
             ),
           }
         : current,
     );
   };
+
+  // One-click marks show at once on the card, the detail and the counts; the request follows in the background and a
+  // failure puts everything back. The list is never loaded again for a mark.
+  const marks = useMarkWriter(reload);
+  const markContextRef = useRef({
+    items: list?.items,
+    unreadOnly,
+    reloadCount,
+  });
+  useEffect(() => {
+    markContextRef.current = { items: list?.items, unreadOnly, reloadCount };
+  });
+  useEffect(() => {
+    const unsubscribe = marks.subscribe(
+      ({ id, kind, changes, before, after }) => {
+        const context = markContextRef.current;
+        if ('read' in changes)
+          setReadOverrides((current) => ({
+            version: context.reloadCount,
+            read: new Map(
+              current.version === context.reloadCount
+                ? current.read
+                : undefined,
+            ).set(id, after.read),
+          }));
+        if ('dismissed' in changes)
+          setHidden((current) => {
+            if (current.has(id) === after.dismissed) return current;
+            const next = new Set(current);
+            if (after.dismissed) next.add(id);
+            else next.delete(id);
+            return next;
+          });
+        setList((current) =>
+          current?.items
+            ? {
+                ...current,
+                items: current.items.map((item) =>
+                  item.id === id
+                    ? {
+                        ...item,
+                        favorite: after.favorite,
+                        later: after.later,
+                        participated: after.participated,
+                        read: after.read,
+                      }
+                    : item,
+                ),
+              }
+            : current,
+        );
+        const item = context.items?.find((entry) => entry.id === id);
+        if (kind !== 'confirmed' && item)
+          setSummary((current) =>
+            current
+              ? countsAfter(current, item, before, after, context.unreadOnly)
+              : current,
+          );
+      },
+    );
+    // Once every mark is saved, the counts are loaded again without showing it, in case the guess above was off.
+    const unsubscribeIdle = marks.onIdle(() =>
+      setCountsVersion((count) => count + 1),
+    );
+    return () => {
+      unsubscribe();
+      unsubscribeIdle();
+    };
+  }, [marks]);
+  const marksOf = (item: FeedListItem): Marks => ({
+    favorite: item.favorite,
+    later: item.later,
+    participated: item.participated,
+    read: item.read,
+    // A listed item in a feed view is not dismissed; elsewhere the detail knows better, and the server decides.
+    dismissed: hidden.has(item.id),
+    feedback: null,
+  });
 
   const [density, setDensity] = useState<Density>(storedDensity);
   const changeDensity = (next: Density): void => {
@@ -368,7 +442,7 @@ export default function FeedPage(): ReactElement {
     }
   };
 
-  // A keyboard change remounts the open detail so it shows the new state.
+  // "Mark all as read" remounts the open detail so it shows the new state; single marks reach it as events.
   const [detailVersion, setDetailVersion] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -407,49 +481,15 @@ export default function FeedPage(): ReactElement {
     }
   };
 
-  const patchState = async (
-    item: FeedListItem,
-    changes: Partial<
-      Pick<ItemState, 'favorite' | 'later' | 'dismissed' | 'read'>
-    >,
-  ): Promise<ItemState | undefined> => {
-    try {
-      const { data } = await api.request<{ data: ItemState }>({
-        path: `feedItems/${encodeURIComponent(item.id)}/state`,
-        method: 'PATCH',
-        json: changes,
-      });
-      setCountsVersion((count) => count + 1);
-      if (item.id === selectedId) setDetailVersion((count) => count + 1);
-      return data;
-    } catch (cause: unknown) {
-      toaster.show({
-        type: 'error',
-        title: t(`feed.errors.${requestProblem(cause)}`),
-      });
-      return undefined;
-    }
-  };
-
-  const dismiss = async (item: FeedListItem): Promise<void> => {
+  const dismiss = (item: FeedListItem): void => {
     const visible = items ?? [];
     const index = visible.findIndex((entry) => entry.id === item.id);
     const next = visible[index + 1] ?? visible[index - 1];
-    const state = await patchState(item, { dismissed: true });
-    if (!state) return;
-    if (['all', 'discuss', 'learn'].includes(view)) {
-      setList((current) =>
-        current?.items
-          ? {
-              ...current,
-              items: current.items.filter((entry) => entry.id !== item.id),
-            }
-          : current,
-      );
+    marks.set(item.id, { dismissed: true }, marksOf(item));
+    if (feedView)
       update({
         item: next && next.id !== item.id ? String(next.id) : undefined,
       });
-    }
     toaster.show({
       id: `feed-dismissed-${item.id}`,
       type: 'success',
@@ -457,11 +497,12 @@ export default function FeedPage(): ReactElement {
       description: item.title,
       action: {
         label: t('feed.shortcuts.undo'),
-        onClick: () => {
-          void patchState(item, { dismissed: false }).then(
-            (restored) => restored && reload(),
-          );
-        },
+        onClick: () =>
+          marks.set(
+            item.id,
+            { dismissed: false },
+            { ...marksOf(item), dismissed: true },
+          ),
       },
     });
   };
@@ -497,19 +538,17 @@ export default function FeedPage(): ReactElement {
       return;
     }
     if (action === 'dismiss') {
-      void dismiss(current);
+      dismiss(current);
       return;
     }
     const key =
       action === 'favorite' ? 'favorite' : action === 'read' ? 'read' : 'later';
-    void patchState(current, { [key]: !current[key] }).then((state) => {
-      if (!state) return;
-      onStateChange(current.id, state);
-      toaster.show({
-        id: `feed-${key}-${current.id}`,
-        type: 'success',
-        title: t(`feed.shortcuts.${key}${state[key] ? 'On' : 'Off'}`),
-      });
+    const value = !current[key];
+    marks.set(current.id, { [key]: value }, marksOf(current));
+    toaster.show({
+      id: `feed-${key}-${current.id}`,
+      type: 'success',
+      title: t(`feed.shortcuts.${key}${value ? 'On' : 'Off'}`),
     });
   };
   useFeedShortcuts(view !== 'digest' || Boolean(selectedId), runShortcut);
@@ -535,6 +574,7 @@ export default function FeedPage(): ReactElement {
       topicNames={topicNames}
       onClose={() => update({ item: undefined })}
       onStateChange={onStateChange}
+      marks={marks}
       onChanged={reload}
       autoRead={readOpening !== selectedId}
       onAutoRead={() => setReadOpening(selectedId)}

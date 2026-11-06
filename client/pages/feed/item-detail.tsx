@@ -54,14 +54,20 @@ import type {
   PartCoverage,
   StateChange,
 } from './types.js';
+import { MARKS, type MarkWriter, type Marks } from './use-item-state.js';
 import { youTubeVideoOf } from './youtube.js';
 
 export interface ItemDetailProps {
   readonly itemId: number;
   readonly topicNames: ReadonlyMap<number, string>;
   readonly onClose: () => void;
-  /** The person's own marks changed; the list card shows them at once. */
+  /** Notes or the participation record were saved; the list card follows. */
   readonly onStateChange: (id: number, state: ItemState) => void;
+  /**
+   * Saves the one-click marks (save, later, joined, read, dismiss, feedback): they show at once, the request follows
+   * in the background, and a failure puts them back.
+   */
+  readonly marks: MarkWriter;
   /** The analysis or the counts changed; the list reloads. */
   readonly onChanged: () => void;
   /**
@@ -73,17 +79,11 @@ export interface ItemDetailProps {
   readonly onAutoRead?: () => void;
 }
 
-type Busy =
-  | 'brief'
-  | 'translate'
-  | 'analyze'
-  | 'enrich'
-  | 'favorite'
-  | 'later'
-  | 'participated'
-  | 'dismissed'
-  | 'read'
-  | 'feedback';
+type Busy = 'brief' | 'translate' | 'analyze' | 'enrich';
+
+/** The one-click marks of an item as the detail shows them. */
+const marksOf = (state: ItemState): Marks =>
+  Object.fromEntries(MARKS.map((mark) => [mark, state[mark]])) as Marks;
 
 /** One item: what the agent concluded, on which material, and the person's own record of it. */
 export function ItemDetail({
@@ -91,6 +91,7 @@ export function ItemDetail({
   topicNames,
   onClose,
   onStateChange,
+  marks,
   onChanged,
   autoRead = true,
   onAutoRead,
@@ -137,41 +138,74 @@ export function ItemDetail({
   const item = result?.item;
   const error = loading ? undefined : result?.error;
 
-  // Opening an item reads it: once, quietly, without reloading the list. A failure leaves it unread and says nothing.
-  const autoReadRef = useRef({ enabled: autoRead, onAutoRead, onStateChange });
+  const toasterRef = useRef(toaster);
+  const tRef = useRef(t);
   useEffect(() => {
-    autoReadRef.current = { enabled: autoRead, onAutoRead, onStateChange };
+    toasterRef.current = toaster;
+    tRef.current = t;
+  });
+
+  // A mark changed here, by a shortcut or by the server's answer shows at once, without loading the item again.
+  useEffect(
+    () =>
+      marks.subscribe((event) => {
+        if (event.id !== itemId) return;
+        setResult((current) =>
+          current?.item?.id === event.id
+            ? {
+                ...current,
+                item: {
+                  ...current.item,
+                  ...('read' in event.changes
+                    ? { read: event.after.read }
+                    : {}),
+                  state: { ...current.item.state, ...event.changes },
+                },
+              }
+            : current,
+        );
+        const adjustment =
+          event.kind === 'confirmed' ? event.state?.adjustment : undefined;
+        if (adjustment)
+          toasterRef.current.show({
+            id: `feed-adjust-${event.id}`,
+            type: 'success',
+            title:
+              adjustment.direction === 'down'
+                ? tRef.current('feed.feedback.adjustedDown')
+                : tRef.current('feed.feedback.adjustedUp'),
+            description: tRef.current('feed.feedback.adjustedDetail', {
+              terms: adjustment.terms.slice(0, 6).join(', '),
+            }),
+          });
+      }),
+    [marks, itemId],
+  );
+
+  // Opening an item reads it: once, quietly, without reloading the list. A failure leaves it unread and says nothing.
+  const autoReadRef = useRef({
+    enabled: autoRead,
+    onAutoRead,
+    marks: {} as Marks,
   });
   const loadedItem = result?.item;
+  useEffect(() => {
+    autoReadRef.current = {
+      enabled: autoRead,
+      onAutoRead,
+      marks: loadedItem ? marksOf(loadedItem.state) : ({} as Marks),
+    };
+  });
   const readOnOpen =
     loadedItem && !loadedItem.state.read ? loadedItem.id : undefined;
   const loadedId = loadedItem?.id;
   useEffect(() => {
-    const { enabled, onAutoRead: done } = autoReadRef.current;
+    const { enabled, onAutoRead: done, marks: shown } = autoReadRef.current;
     if (loadedId === undefined || !enabled) return;
     done?.();
     if (readOnOpen === undefined) return;
-    api
-      .request<{ data: ItemState }>({
-        path: `feedItems/${encodeURIComponent(readOnOpen)}/state`,
-        method: 'PATCH',
-        json: { read: true },
-      })
-      .then(
-        ({ data: state }) => {
-          setResult((current) =>
-            current?.item?.id === readOnOpen
-              ? {
-                  ...current,
-                  item: { ...current.item, read: state.read, state },
-                }
-              : current,
-          );
-          autoReadRef.current.onStateChange(readOnOpen, state);
-        },
-        () => undefined,
-      );
-  }, [api, loadedId, readOnOpen]);
+    marks.set(readOnOpen, { read: true }, shown, { quiet: true });
+  }, [marks, loadedId, readOnOpen]);
 
   // An item opened without a brief gets one at once, so that what it says is the first thing on the page.
   const needsBrief =
@@ -221,43 +255,9 @@ export function ItemDetail({
     if (problem === 'notFound') onChanged();
   };
 
-  const patchState = async (
-    changes: Partial<ItemState>,
-    action: Busy,
-  ): Promise<boolean> => {
-    if (!item) return false;
-    setBusy(action);
-    try {
-      const { data } = await api.request<{ data: StateChange }>({
-        path: `feedItems/${encodeURIComponent(item.id)}/state`,
-        method: 'PATCH',
-        json: changes,
-      });
-      const { adjustment, ...state } = data;
-      replace({ ...item, ...state, state });
-      onStateChange(item.id, state);
-      onChanged();
-      if (adjustment) {
-        toaster.show({
-          id: `feed-adjust-${item.id}`,
-          type: 'success',
-          title:
-            adjustment.direction === 'down'
-              ? t('feed.feedback.adjustedDown')
-              : t('feed.feedback.adjustedUp'),
-          description: t('feed.feedback.adjustedDetail', {
-            terms: adjustment.terms.slice(0, 6).join(', '),
-            count: adjustment.rescored,
-          }),
-        });
-      }
-      return true;
-    } catch (cause: unknown) {
-      failed(cause);
-      return false;
-    } finally {
-      setBusy(undefined);
-    }
+  // No waiting and no reload: the writer shows the mark now and saves it behind the person's back.
+  const mark = (changes: Partial<Marks>): void => {
+    if (item) marks.set(item.id, changes, marksOf(item.state));
   };
 
   const analyze = async (): Promise<void> => {
@@ -463,58 +463,37 @@ export function ItemDetail({
         <div className='flex flex-wrap gap-2'>
           <ToggleButton
             pressed={item.state.favorite}
-            busy={busy === 'favorite'}
-            disabled={Boolean(busy)}
             icon={
               <BookmarkIcon
                 className={cn(item.state.favorite && 'fill-current')}
               />
             }
             label={t('feed.state.favorite')}
-            onClick={() =>
-              void patchState({ favorite: !item.state.favorite }, 'favorite')
-            }
+            onClick={() => mark({ favorite: !item.state.favorite })}
           />
           <ToggleButton
             pressed={item.state.later}
-            busy={busy === 'later'}
-            disabled={Boolean(busy)}
             icon={<ClockIcon />}
             label={t('feed.state.later')}
-            onClick={() =>
-              void patchState({ later: !item.state.later }, 'later')
-            }
+            onClick={() => mark({ later: !item.state.later })}
           />
           <ToggleButton
             pressed={item.state.participated}
-            busy={busy === 'participated'}
-            disabled={Boolean(busy)}
             icon={<CheckCheckIcon />}
             label={t('feed.state.participated')}
-            onClick={() =>
-              void patchState(
-                { participated: !item.state.participated },
-                'participated',
-              )
-            }
+            onClick={() => mark({ participated: !item.state.participated })}
           />
           <ToggleButton
             pressed={!item.state.read}
-            busy={busy === 'read'}
-            disabled={Boolean(busy)}
             icon={<CircleDotIcon />}
             label={t('feed.state.unread')}
-            onClick={() => void patchState({ read: !item.state.read }, 'read')}
+            onClick={() => mark({ read: !item.state.read })}
           />
           <ToggleButton
             pressed={item.state.dismissed}
-            busy={busy === 'dismissed'}
-            disabled={Boolean(busy)}
             icon={<EyeOffIcon />}
             label={t('feed.state.dismissed')}
-            onClick={() =>
-              void patchState({ dismissed: !item.state.dismissed }, 'dismissed')
-            }
+            onClick={() => mark({ dismissed: !item.state.dismissed })}
           />
         </div>
       </header>
@@ -736,11 +715,7 @@ export function ItemDetail({
               </p>
               <FeedbackButtons
                 value={item.state.feedback}
-                busy={busy === 'feedback'}
-                disabled={Boolean(busy)}
-                onChange={(feedback) =>
-                  void patchState({ feedback }, 'feedback')
-                }
+                onChange={(feedback) => mark({ feedback })}
               />
             </>
           ) : (
@@ -974,15 +949,11 @@ function Metrics({
 
 function ToggleButton({
   pressed,
-  busy,
-  disabled,
   icon,
   label,
   onClick,
 }: {
   readonly pressed: boolean;
-  readonly busy: boolean;
-  readonly disabled: boolean;
   readonly icon: ReactNode;
   readonly label: string;
   readonly onClick: () => void;
@@ -993,11 +964,10 @@ function ToggleButton({
       size='sm'
       variant='outline'
       aria-pressed={pressed}
-      disabled={disabled}
       onClick={onClick}
       className='aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary'
     >
-      {busy ? <Spinner data-icon='inline-start' /> : icon}
+      {icon}
       {label}
     </Button>
   );
@@ -1005,13 +975,9 @@ function ToggleButton({
 
 function FeedbackButtons({
   value,
-  busy,
-  disabled,
   onChange,
 }: {
   readonly value: ItemState['feedback'];
-  readonly busy: boolean;
-  readonly disabled: boolean;
   readonly onChange: (value: ItemState['feedback']) => void;
 }): ReactElement {
   const { t } = useTranslation();
@@ -1023,7 +989,6 @@ function FeedbackButtons({
         size='xs'
         variant='ghost'
         aria-pressed={value === 'helpful'}
-        disabled={disabled}
         onClick={() => onChange(value === 'helpful' ? null : 'helpful')}
         className='aria-pressed:bg-primary/10 aria-pressed:text-primary'
       >
@@ -1035,14 +1000,12 @@ function FeedbackButtons({
         size='xs'
         variant='ghost'
         aria-pressed={value === 'irrelevant'}
-        disabled={disabled}
         onClick={() => onChange(value === 'irrelevant' ? null : 'irrelevant')}
         className='aria-pressed:bg-muted aria-pressed:text-foreground'
       >
         <ThumbsDownIcon data-icon='inline-start' />
         {t('feed.feedback.irrelevant')}
       </Button>
-      {busy ? <Spinner /> : null}
     </div>
   );
 }

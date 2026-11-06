@@ -33,8 +33,18 @@ the person's topics and experience, and the person keeps their own marks and not
 
 - **Feedback learns.** "Useful" / "Not relevant" moves the weight of the words that matched the item by ±1 within
   `TERM_WEIGHT_MIN`..`TERM_WEIGHT_MAX` (stored in `feedProfiles.termWeights`); changing or withdrawing feedback undoes
-  the earlier step. Recent rule-based analyses mentioning those words are re-scored at once (never spending model
-  budget), the reason says which weights applied, and the model prompt lists them.
+  the earlier step. The weights are saved with the feedback; the recent rule-based analyses mentioning those words are
+  re-scored after the response by the `nocofeed.rescore-feedback` job (`rescore-job.ts`, a `JobExecutor` one-off task;
+  without the executor the service runs it detached), one person's re-scores one after another, yielding to requests
+  between items (SQLite answers synchronously). Never spends model budget; the reason says which weights applied, and the
+  model prompt lists them. The list shows the new scores on its next load.
+- **Marks answer at once.** Save, later, joined, read, dismiss and feedback go through the page's mark writer
+  (`use-item-state.ts`): the card, the detail and the view counts change on click, the `PATCH …/state` follows in the
+  background, one request at a time per item and mark (a `SubmissionController` each, sending `Idempotency-Key`; the
+  route then applies the change once through `executeIdempotentMutation`), quick clicks collapse to the last value, and a
+  failure puts the mark back with a toast and a retry. A request whose outcome is unknown is retried with its original
+  key before any newer value is sent. Nothing reloads the list; the counts are fetched again quietly once every mark is
+  saved. Notes and the participation record are forms with their own save button.
 - **Daily digest.** `GET /feedDigest` returns the top three `discuss` and top one `learn` items collected in the last
   24 hours; the client shows it as `/?view=digest`. `send-digests` sends it once per local day after `digestHour` in the
   person's `timeZone` (saved from the browser), keyed `feed-digest:<owner>:<date>`; a day with nothing sends nothing.

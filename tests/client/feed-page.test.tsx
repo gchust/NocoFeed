@@ -189,7 +189,11 @@ const patched = (id: string, changes: unknown) => {
   states[id] = { ...(states[id] ?? state), ...(changes as object) };
   return { data: states[id] };
 };
+// Lets a test hold a mark's request open (or fail it) to see what shows before the server answers.
+let gate: ((call: ApiCall) => Promise<unknown> | undefined) | undefined;
 const api = vi.fn(({ method, path, query, json }: ApiCall) => {
+  const gated = gate?.({ method, path, query, json });
+  if (gated) return gated;
   if (method === 'GET' && path === 'feedItems') return itemsResponse;
   if (method === 'GET' && path === 'feedItems/summary')
     return {
@@ -335,6 +339,7 @@ describe('feed page', () => {
         }) as unknown as MediaQueryList,
     );
     api.mockClear();
+    gate = undefined;
     summaryUnhealthy = 0;
     states = {};
     itemsResponse = { data: [listItem], meta: {} };
@@ -1115,5 +1120,160 @@ describe('feed page', () => {
     expect(
       within(content).getByRole('button', { name: 'Fetch Body, Comments' }),
     ).toBeInTheDocument();
+  });
+  describe('marks answer at once (issue #11)', () => {
+    /** A request for one mark that the test answers later. */
+    function holdMarks(mark: string) {
+      const held: {
+        json: Record<string, unknown>;
+        answer: (fail?: boolean) => void;
+      }[] = [];
+      let inFlight = 0;
+      let mostInFlight = 0;
+      gate = (call) => {
+        if (call.method !== 'PATCH' || !(mark in ((call.json as object) ?? {})))
+          return undefined;
+        inFlight += 1;
+        mostInFlight = Math.max(mostInFlight, inFlight);
+        return new Promise((resolve) => {
+          held.push({
+            json: call.json as Record<string, unknown>,
+            answer: (fail) => {
+              inFlight -= 1;
+              resolve(
+                fail
+                  ? new Response(null, { status: 500 })
+                  : patched(String(call.path.split('/')[1]), call.json),
+              );
+            },
+          });
+        });
+      };
+      return { held, mostInFlight: () => mostInFlight };
+    }
+    const listLoads = () =>
+      api.mock.calls.filter(
+        ([call]) => call.method === 'GET' && call.path === 'feedItems',
+      ).length;
+
+    it('shows a mark, the card and the counts before the server answers, without loading the list again', async () => {
+      const { held } = holdMarks('favorite');
+      await renderAt('/?item=7');
+      const rail = await screen.findByRole('navigation', {
+        name: enUS.feed.views.label,
+      });
+      const savedView = await within(rail).findByRole('button', {
+        name: new RegExp(`^${enUS.feed.views.saved}`),
+      });
+      await waitFor(() => expect(savedView).toHaveTextContent(/0$/));
+      const loads = listLoads();
+
+      await userEvent.click(
+        await screen.findByRole('button', {
+          name: enUS.feed.state.favorite,
+          pressed: false,
+        }),
+      );
+      // The request is still open: the button, the count and the card already say saved.
+      expect(held).toHaveLength(1);
+      expect(
+        screen.getByRole('button', {
+          name: enUS.feed.state.favorite,
+          pressed: true,
+        }),
+      ).toBeEnabled();
+      expect(savedView).toHaveTextContent(/1$/);
+
+      held[0].answer();
+      await waitFor(() => expect(states['7']?.favorite).toBe(true));
+      expect(
+        screen.getByRole('button', {
+          name: enUS.feed.state.favorite,
+          pressed: true,
+        }),
+      ).toBeInTheDocument();
+      expect(listLoads()).toBe(loads);
+    });
+
+    it('puts a mark back and says so when it cannot be saved', async () => {
+      const { held } = holdMarks('later');
+      await renderAt('/?item=7');
+      await userEvent.click(
+        await screen.findByRole('button', {
+          name: enUS.feed.state.later,
+          pressed: false,
+        }),
+      );
+      expect(
+        screen.getByRole('button', {
+          name: enUS.feed.state.later,
+          pressed: true,
+        }),
+      ).toBeInTheDocument();
+
+      held[0].answer(true);
+      expect(
+        await screen.findByRole('button', {
+          name: enUS.feed.state.later,
+          pressed: false,
+        }),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByText(enUS.feed.state.saveFailed),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the last of quick clicks, one request at a time', async () => {
+      const { held, mostInFlight } = holdMarks('participated');
+      await renderAt('/?item=7');
+      const button = () =>
+        screen.getByRole('button', { name: enUS.feed.state.participated });
+      await screen.findByRole('button', {
+        name: enUS.feed.state.participated,
+      });
+      // Four clicks while the first is being saved: on, off, on, off.
+      for (let click = 0; click < 4; click += 1)
+        await userEvent.click(button());
+      expect(button()).toHaveAttribute('aria-pressed', 'false');
+      expect(held).toHaveLength(1);
+
+      held[0].answer();
+      // The first answer (on) does not show over the later clicks; the last value is sent next.
+      await waitFor(() => expect(held).toHaveLength(2));
+      expect(button()).toHaveAttribute('aria-pressed', 'false');
+      expect(held.map((request) => request.json)).toEqual([
+        { participated: true },
+        { participated: false },
+      ]);
+      held[1].answer();
+      await waitFor(() => expect(states['7']?.participated).toBe(false));
+      expect(button()).toHaveAttribute('aria-pressed', 'false');
+      expect(mostInFlight()).toBe(1);
+    });
+
+    it('marks feedback at once while the server learns from it', async () => {
+      const { held } = holdMarks('feedback');
+      await renderAt('/?item=7');
+      await userEvent.click(
+        await screen.findByRole('button', {
+          name: new RegExp(enUS.feed.detail.analysis),
+        }),
+      );
+      await userEvent.click(
+        screen.getByRole('button', {
+          name: enUS.feed.feedback.irrelevant,
+          pressed: false,
+        }),
+      );
+      expect(
+        screen.getByRole('button', {
+          name: enUS.feed.feedback.irrelevant,
+          pressed: true,
+        }),
+      ).toBeEnabled();
+      expect(held).toHaveLength(1);
+      held[0].answer();
+      await waitFor(() => expect(states['7']?.feedback).toBe('irrelevant'));
+    });
   });
 });

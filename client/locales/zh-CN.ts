@@ -135,13 +135,14 @@ const zhCN: AppResource = {
       participated: '已参与',
       dismissed: '移出信息流',
       unread: '标为未读',
+      saveFailed: '这次修改没能保存，已恢复原状',
     },
     feedback: {
       helpful: '有用',
       irrelevant: '不相关',
       adjustedDown: '已据此调整排序：类似内容会排得更靠后',
       adjustedUp: '已据此调整排序：类似内容会排得更靠前',
-      adjustedDetail: '调整的词：{{terms}}；已重新评分 {{count}} 条近期内容。',
+      adjustedDetail: '调整的词：{{terms}}；近期内容正在后台重新评分。',
     },
     digest: {
       title: '今日简报',

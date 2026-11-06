@@ -265,7 +265,8 @@ export interface StateChange extends ItemState {
   readonly adjustment?: {
     readonly direction: 'up' | 'down';
     readonly terms: readonly string[];
-    readonly rescored: number;
+    /** Recent items are scored again in the background; the list shows it on its next load. */
+    readonly rescoring: boolean;
   };
 }
 
