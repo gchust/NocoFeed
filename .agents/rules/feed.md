@@ -18,6 +18,7 @@ the person's topics and experience, and the person keeps their own marks and not
   and push" below).
   `202611210001_feed_reply_drafts.ts` (`feedReplyDrafts`, `feedProfiles.replyGuidelines`/`replyPlatformGuidelines`,
   see "Reply drafts" below).
+  `202611250001_feed_ideas.ts` (`feedIdeas`, `feedIdeaSettings`: see "Ideas" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -373,6 +374,45 @@ The detail has an "Ask about this item" section (`client/pages/feed/ask.tsx`, `s
   `tests/server/feed-ask-material.test.ts` (routing by platform, failures, preparation with its deadline and failures,
   the page of a link-only item, the Reddit RSS fallback, comments stored and not fetched again) and
   `tests/client/feed-ask.test.tsx`.
+
+## Ideas
+
+The detail has an "Ideas" section (issue #16; `client/pages/feed/ideas.tsx`, `server/providers/feed/ideas.ts`,
+`server/routes/feed-ideas.ts`): things the person could publish from the item — Xiaohongshu notes (title, body with
+emoji and tags, cover), X posts or threads, 30–60 s short-video scripts (shots with visual / line / caption / seconds),
+Bilibili plans (title, description, 3–5 outline parts) and memes (caption, picture composition, the trend it plays
+on; never an image). Two per kind.
+
+- **Tables.** `feedIdeas`: one row per person, item and kind with the ideas as JSON, `status` (`pending` / `ready` /
+  `failed` + code `noModel` / `ideasFailed`; a pending row older than `IDEAS_PENDING_TIMEOUT_MS` reads as `timeout`),
+  `styleVersion` (hash of the style), `model`, `webSearch`, `trigger` (`manual`/`auto`), `generatedAt`.
+  `feedIdeaSettings`: per person `style` (null = `DEFAULT_IDEA_STYLE`; saving the default unchanged stores null),
+  `kinds` (null = all), `auto`, `xLanguage` (null = English). Kept apart from `feedProfiles` on purpose.
+- **Routes.** `GET|POST|DELETE /feedItems/:id/ideas` (state; start generating the given or chosen kinds → `202`, `409`
+  while one runs for the item, `503` without a model; delete all or `?kind=`), `POST /feedItems/:id/ideas/again`
+  (`{ kind, index }`: one new idea in place of that one, the others kept and shown to the model as "already
+  suggested"), `GET|PUT /feedIdeaSettings`. Session plus the authorization middleware (the online agent acts as the
+  caller); another person's item is a `404`.
+- **Background.** The route marks rows pending and answers; the work runs detached (`settled()` awaits it in tests); the
+  card polls every `IDEAS_POLL_MS` while a set is pending. Answers are normalized per kind (`normalizeIdea`): tags
+  stripped, X posts over `X_POST_LIMIT` (280) split at sentence ends (`splitPost`), script shots scaled into 30–60 s,
+  outlines cut to five; a kind with nothing usable is `ideasFailed`. One retry when the answer is cut off.
+- **Model.** The prompt has the item (title, link, brief, analysis lead, summary, body), up to six related items (the
+  latest favourites and the best recent recommendations), the style, and the reading language (Xiaohongshu/Bilibili
+  always Simplified Chinese, X in `xLanguage`). When the person asks and the default model supports native web search
+  (`models.services.capabilities`), a background OnlineAgent session (`onlineAgent.background`, `webSearch: true`,
+  `tool: []`, JSON Schema `ideasSchema`) writes them and is deleted afterwards; if that fails, or search is not
+  supported, `models.gateway.generate` writes them from the item alone and the card says so. Manual generation does
+  not count against `dailyLimit`.
+- **Automatic.** With `auto` on, the `collect-due-sources` tick runs `ideasPending`: `discuss` items collected in the
+  last two days, not dismissed, without ideas, best first, `IDEAS_PER_TICK` per tick and at most
+  `min(10, dailyLimit)` items a day per person; gateway only (no person to act as, so no web search).
+- **Preferences.** `client/pages/preferences/ideas.tsx` (`IdeaSettingsCard`) saves on its own: style textarea with
+  "Use the default", kind checkboxes (at least one), X language, automatic switch. Changing the style marks earlier
+  ideas `stale`.
+- Copy is in `feed.ideas` and `preferences.ideas`. Tests: `tests/server/feed-ideas.test.ts` (prompt, structure per
+  kind, routes with a fake OpenAI-compatible model, other owner's 404, settings, automatic, online/gateway choice),
+  `tests/client/feed-ideas.test.tsx`, `tests/database/feed-ideas-migration.test.ts`.
 
 ## Tests
 

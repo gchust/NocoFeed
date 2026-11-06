@@ -16,6 +16,7 @@ import type { FeedConfig } from '../../config/feed.js';
 import { createAdapters, type Adapters } from './adapters.js';
 import { feedItemSubject } from './agent-reader.js';
 import { ASK_THREAD, ASK_TRIGGER, createFeedAsk, type FeedAsk } from './ask.js';
+import { createFeedIdeas, type FeedIdeas } from './ideas.js';
 import { createIngest, type FeedIngest } from './ingest.js';
 import { createMailCollector, withMail, type MailCollector } from './mail.js';
 import { readPageText } from './page.js';
@@ -25,6 +26,7 @@ import { createFeedService, type FeedService } from './service.js';
 
 export type { FeedService } from './service.js';
 export type { FeedAsk } from './ask.js';
+export type { FeedIdeas } from './ideas.js';
 export type { FeedIngest } from './ingest.js';
 export type { MailCollector } from './mail.js';
 export type { FeedReplies } from './replies.js';
@@ -36,6 +38,10 @@ export const feedServiceToken: ServiceToken<FeedService> =
 /** Questions about one item (`ask.ts`): the online agent's conversation and the runner agent's deeper look. */
 export const feedAskToken: ServiceToken<FeedAsk> =
   createServiceToken<FeedAsk>('nocofeed/feed-ask');
+
+/** Ideas for creating something from an item (`ideas.ts`): Xiaohongshu notes, X posts, scripts, outlines, memes. */
+export const feedIdeasToken: ServiceToken<FeedIdeas> =
+  createServiceToken<FeedIdeas>('nocofeed/feed-ideas');
 
 /** `POST /feedItems/ingest`: links and posts pushed into the person's own feed (`ingest.ts`). */
 export const feedIngestToken: ServiceToken<FeedIngest> =
@@ -123,6 +129,20 @@ export default class FeedProvider extends ServiceProvider<Application> {
     this.app.container.singleton(feedRepliesToken, () => {
       const feed = () => this.app.container.resolve(feedServiceToken);
       return createFeedReplies({
+        database: this.app.container.resolve(databaseManagerToken),
+        agents: () =>
+          this.app.container.has(agentsToken)
+            ? this.app.container.resolve(agentsToken)
+            : undefined,
+        getItem: (ownerId, id) => feed().getItem(ownerId, id),
+        getProfile: (ownerId) => feed().getProfile(ownerId),
+        log: (level, message, context) =>
+          logger()[level]({ ...context }, message),
+      });
+    });
+    this.app.container.singleton(feedIdeasToken, () => {
+      const feed = () => this.app.container.resolve(feedServiceToken);
+      return createFeedIdeas({
         database: this.app.container.resolve(databaseManagerToken),
         agents: () =>
           this.app.container.has(agentsToken)
@@ -237,6 +257,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         await feed.briefPending();
         // Reply drafts in the post's own language for recent discussions, a few per tick.
         await this.app.container.resolve(feedRepliesToken).pending();
+        // Ideas for items worth discussing, for people who turned automatic ideas on; they run in the background.
+        await this.app.container.resolve(feedIdeasToken).ideasPending();
       },
     });
     await this.executor.addJob({

@@ -538,6 +538,59 @@ const enUS = {
       save: 'Save notes',
       saved: 'Notes saved.',
     },
+    ideas: {
+      title: 'Ideas',
+      hint: 'Turn this item into something of your own: a Xiaohongshu note, an X post, a short-video script, a Bilibili outline or a meme, in your creative style.',
+      generate: 'Generate ideas',
+      generating: 'Generating…',
+      regenerate: 'Regenerate',
+      again: 'Another one',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Could not copy. Select the text and copy it instead.',
+      delete: 'Delete',
+      deleteTitle: 'Delete these ideas?',
+      deleteDescription:
+        'The ideas for this item are deleted. You can generate new ones at any time.',
+      deleted: 'Ideas deleted',
+      webSearch:
+        'The model searches the web to connect ideas to what is happening now.',
+      noWebSearch:
+        'The model cannot search the web, so ideas draw only on this item and what the model already knows.',
+      generated: 'Generated {{time}}.',
+      generatedSearched: 'Generated {{time}} with web search.',
+      stale: 'Your creative style has changed since; regenerate to use it.',
+      seconds: '{{count}} s',
+      characters: '{{count}} chars',
+      shot: 'Shot {{number}} · {{seconds}} s',
+      visual: 'Visual',
+      line: 'Voice-over',
+      caption: 'On-screen text',
+      cover: 'Cover and pictures',
+      description: 'Description',
+      outline: 'Outline',
+      image: 'Meme picture',
+      trend: 'Plays on',
+      kinds: {
+        xiaohongshu: 'Xiaohongshu note',
+        x: 'X post',
+        shortVideo: 'Short video script',
+        bilibili: 'Bilibili video',
+        meme: 'Meme',
+      },
+      errors: {
+        noModel: 'No AI model is set up, so no ideas could be generated.',
+        ideasFailed:
+          'The model did not come up with usable ideas this time. Try again.',
+        timeout: 'Generating took too long and stopped. Try again.',
+      },
+      unavailable: {
+        title: 'No AI model yet',
+        description:
+          'Ideas are written by the chat model under System settings → AI models.',
+        models: 'Set up AI models',
+      },
+    },
   },
   topics: {
     title: 'Topics',
@@ -1153,6 +1206,31 @@ const enUS = {
         'No runner agent is enabled. An administrator connects a runtime and enables agents under System settings → Runtimes and Agents.',
       readingLanguage:
         'The language of AI briefs and translations. Items in the feed get a brief from the AI model automatically, with foreign titles translated; the full text can be translated from the details. Briefs and analyses each count against the daily model limit.',
+    },
+    ideas: {
+      title: 'Ideas',
+      description:
+        'How ideas for posts, videos and memes are written on the item details.',
+      style: 'Creative style and persona',
+      styleHint:
+        'Who you are, who you write for and how. Ideas written before a change are marked so you can regenerate them.',
+      resetStyle: 'Use the default',
+      kinds: 'Kinds of ideas',
+      kindsHint: 'Each kind gets two ideas.',
+      kindsEmpty: 'Choose at least one kind.',
+      xLanguage: 'Language of X posts',
+      xLanguages: {
+        en: 'English',
+        'zh-CN': 'Simplified Chinese',
+        'zh-TW': 'Traditional Chinese',
+        ja: 'Japanese',
+        ko: 'Korean',
+      },
+      auto: 'Generate ideas automatically',
+      autoHint:
+        'Items worth discussing get ideas on their own, up to 10 items a day within the daily model limit. Off: ideas are generated only when you ask.',
+      save: 'Save idea settings',
+      saved: 'Idea settings saved.',
     },
     learned: {
       title: 'Learned from your feedback',
