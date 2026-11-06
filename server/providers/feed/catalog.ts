@@ -8,13 +8,29 @@
 export type Implementation = 'native' | 'collector';
 
 export type Platform =
-  'reddit' | 'hn' | 'rss' | 'youtube' | 'bilibili' | 'xiaohongshu' | 'x';
+  | 'reddit'
+  | 'hn'
+  | 'rss'
+  | 'youtube'
+  | 'bilibili'
+  | 'xiaohongshu'
+  | 'x'
+  | 'mail'
+  | 'inbox';
+
+/**
+ * The push inbox: what the person (or a browser extension, a script) sends to `POST /feedItems/ingest`. Every owner has
+ * at most one such `feedSources` row, made on the first push. It is not in the catalog: nobody subscribes to it, and it
+ * is never collected (`ingest.ts`).
+ */
+export const INBOX_PLATFORM = 'inbox';
+export const INBOX_OPERATION = 'push';
 
 export interface OperationSpec {
   readonly operation: string;
   readonly implementation: Implementation;
-  /** How the target is entered. */
-  readonly input: 'text' | 'url' | 'none';
+  /** How the target is entered; `account` is one of the person's own connected mail accounts. */
+  readonly input: 'text' | 'url' | 'none' | 'account';
   /** Single-item tracking rather than a list that keeps producing new items. */
   readonly single?: boolean;
   /** What a successful run brings back, as stable codes the browser translates. */
@@ -204,6 +220,20 @@ export const CATALOG: readonly PlatformSpec[] = [
         single: true,
         capabilities: ['postThread'],
         enrich: ['comments'],
+      },
+    ],
+  },
+  {
+    // The person's own mailbox, read through the Mail plugin (`mail.ts`): the target is one of their connected
+    // accounts, and only they can read what it brings in. Nothing in the mailbox is changed.
+    platform: 'mail',
+    operations: [
+      {
+        operation: 'messages',
+        implementation: 'native',
+        input: 'account',
+        capabilities: ['newMessages', 'messageText', 'mailFilters'],
+        enrich: [],
       },
     ],
   },

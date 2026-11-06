@@ -17,6 +17,7 @@ const FEED_PAGES = [
   'sourceCreate',
   'sourceEdit',
   'sourceRecommended',
+  'sourcePush',
   'runs',
   'preferences',
 ];
@@ -55,7 +56,9 @@ describe('app client routes', () => {
         default: expect.any(Function),
       });
     }
-  });
+    // Every page module is transformed on first load, and the Mail plugin's account page alone brings in its whole
+    // client, so the walk takes longer than one ordinary test.
+  }, 90_000);
 
   it('pins the page authorization of every signed-in page', () => {
     // A stored page grant records the page's `authz` resource id (`authorizedAs`), not its route `name`: changing an
@@ -69,6 +72,8 @@ describe('app client routes', () => {
     expect(pageAuthorizations(resolved.routes)).toEqual([
       ...FEED_PAGES.map((name) => ({ name, authorizedAs: null })),
       { name: 'inbox', authorizedAs: null },
+      // Where mail accounts are connected: the Mail plugin's own page grant, which its API checks too.
+      { name: 'mailAccounts', authorizedAs: 'mail.workspace' },
       { name: 'settingsUsers', authorizedAs: 'user:*' },
       { name: 'settingsUserCreate', authorizedAs: 'user:*' },
       { name: 'settingsUser', authorizedAs: 'user:*' },

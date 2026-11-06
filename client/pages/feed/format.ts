@@ -52,6 +52,11 @@ const MESSAGE_CODES = new Set([
   'unsupportedOperation',
   'unsupportedPart',
   'invalidResponse',
+  // Mail subscriptions (`server/providers/feed/mail.ts`).
+  'mailUnavailable',
+  'mailAccountMissing',
+  'mailAccountInactive',
+  'mailFolderMissing',
 ]);
 
 const NOTE_CODES = new Set([
@@ -75,6 +80,15 @@ const NOTE_CODES = new Set([
   'unconfigured',
   'unsupported',
   'failed',
+  // Mail and pushed links (`mail.ts`, `ingest.ts`, `page.ts`).
+  'previewOnly',
+  'truncated',
+  'pageWithoutText',
+  'pageUrlNotAllowed',
+  'pageNotText',
+  'pageRedirects',
+  'pageHostUnknown',
+  'pageFailed',
 ]);
 
 /** A translated status message, or `undefined` when the server stored free text that must not be shown. */

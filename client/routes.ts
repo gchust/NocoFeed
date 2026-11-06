@@ -9,6 +9,7 @@ import {
   Bot,
   Cpu,
   History,
+  Mail,
   Newspaper,
   Rss,
   Server,
@@ -78,6 +79,12 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         name: 'sourceRecommended',
         path: 'recommended',
         componentLoader: () => import('./pages/sources/recommended.js'),
+      },
+      {
+        // How to push links and posts (`POST /api/feedItems/ingest`) and the API keys that do it.
+        name: 'sourcePush',
+        path: 'push',
+        componentLoader: () => import('./pages/sources/push.js'),
       },
     ],
   },
@@ -180,8 +187,28 @@ const modelSettingsRoutes: AppClientRouteContribution = defineAppRoutes([
   },
 ]);
 
+// The Mail plugin contributes no routes: this is where a person connects the mail accounts a mail subscription reads
+// (`server/providers/feed/mail.ts`), and where OAuth returns (`mail.oauthReturnUrl: /mail/accounts`). It stands behind
+// the plugin's own `mail.workspace` page grant, which its API checks too, so only people given it (and unrestricted
+// administrators) can connect mail.
+const mailRoutes: AppClientRouteContribution = defineAppRoutes([
+  {
+    name: 'mailAccounts',
+    path: '/mail/accounts',
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: 'mail.workspace' },
+      action: 'access',
+    },
+    navigation: { title: 'navigation.mailAccounts', icon: Mail },
+    breadcrumb: { title: 'navigation.mailAccounts' },
+    componentLoader: () => import('./pages/mail-accounts.js'),
+  },
+]);
+
 const routes: readonly AppClientRouteContribution[] = [
   appRoutes,
+  mailRoutes,
   systemSettingsRoutes,
   modelSettingsRoutes,
 ];

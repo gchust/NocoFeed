@@ -8,6 +8,7 @@ import {
   PlayIcon,
   PlusIcon,
   RssIcon,
+  SendIcon,
   SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -183,6 +184,10 @@ export default function SourcesPage(): ReactElement {
         description={t('sources.description')}
         actions={
           <>
+            <Link to='push' className={buttonVariants({ variant: 'outline' })}>
+              <SendIcon data-icon='inline-start' />
+              {t('sources.push.open')}
+            </Link>
             <Link
               to='recommended'
               className={buttonVariants({ variant: 'outline' })}
@@ -391,14 +396,15 @@ export default function SourcesPage(): ReactElement {
   );
 }
 
-/** Whether the subscription's operation takes no target, so its stored target is an internal value. */
+/**
+ * Whether the subscription's stored target is an internal value rather than something to show: none at all, or a mail
+ * account's id (the name says which account).
+ */
 function targetless(catalog: Catalog | undefined, source: Source): boolean {
-  return (
-    catalog?.platforms
-      .find((entry) => entry.platform === source.platform)
-      ?.operations.find((entry) => entry.operation === source.operation)
-      ?.input === 'none'
-  );
+  const input = catalog?.platforms
+    .find((entry) => entry.platform === source.platform)
+    ?.operations.find((entry) => entry.operation === source.operation)?.input;
+  return input === 'none' || input === 'account';
 }
 
 /** Says plainly what runs without a Collector or a model, so nobody wonders why a platform stays empty. */

@@ -44,6 +44,7 @@ const enUS = {
     agents: 'Agents',
     runtimes: 'Runtimes',
     agentUsage: 'Agent usage',
+    mailAccounts: 'Mail accounts',
   },
   // What the Agents plugin's pages call NocoFeed's subject and why its runs start (`agent-reader.ts`).
   agents: {
@@ -132,6 +133,8 @@ const enUS = {
       bilibili: 'Bilibili',
       xiaohongshu: 'Xiaohongshu',
       x: 'X',
+      mail: 'Mail',
+      inbox: 'Pushed',
     },
     verdict: {
       pending: 'Not analysed',
@@ -304,6 +307,13 @@ const enUS = {
       unsupportedOperation: 'The Collector does not support this operation.',
       unsupportedPart: 'The Collector cannot read this part.',
       invalidResponse: 'The Collector returned an unrecognised result.',
+      mailUnavailable: 'Mail is not available in this application.',
+      mailAccountMissing:
+        'The mail account is gone. Choose another one or connect it again.',
+      mailAccountInactive:
+        'The mail account is suspended or needs to be connected again under Mail accounts.',
+      mailFolderMissing:
+        'The mail folder was not found. Check its name, or leave it empty for the inbox.',
     },
     notes: {
       commentsNotSupported: 'Comments are not read for this platform.',
@@ -328,6 +338,15 @@ const enUS = {
       unconfigured: 'Needs the Docker Collector.',
       unsupported: 'Not supported for this platform.',
       failed: 'Fetching failed.',
+      previewOnly: 'Only the preview of the message was available.',
+      truncated: 'The text was cut short.',
+      pageWithoutText: 'The page had no readable text.',
+      pageUrlNotAllowed:
+        'The link points to an address NocoFeed does not open; only the link was kept.',
+      pageNotText: 'The link is not a web page; only the link was kept.',
+      pageRedirects: 'The link redirected too often; only the link was kept.',
+      pageHostUnknown: 'The site could not be found; only the link was kept.',
+      pageFailed: 'The page could not be read; only the link was kept.',
     },
     errors: {
       sessionExpired: 'Your session has ended. Sign in again to continue.',
@@ -609,6 +628,8 @@ const enUS = {
       bilibili: { keyword: 'Search', video: 'One video' },
       xiaohongshu: { keyword: 'Search', post: 'One note' },
       x: { keyword: 'Search', account: 'Account posts', post: 'One post' },
+      mail: { messages: 'New messages' },
+      inbox: { push: 'Pushed items' },
     },
     capabilities: {
       newPosts: 'new posts',
@@ -635,6 +656,80 @@ const enUS = {
       threadOnDemand: 'thread on request',
       accountPosts: 'account posts',
       postThread: 'post and thread',
+      newMessages: 'new messages since the last run',
+      messageText: 'message text',
+      mailFilters: 'folder, sender and subject filters',
+    },
+    mail: {
+      account: 'Mail account',
+      choose: 'Choose an account',
+      none: 'You have not connected a mail account yet.',
+      unavailable: 'Mail is not available in this application.',
+      inactive: 'Needs attention',
+      accountHint:
+        'Only your own accounts are listed, and only you see what they bring in. Messages are read, never marked or moved.',
+      manage: 'Manage mail accounts',
+      accountRequired: 'Choose a mail account.',
+      folder: 'Folder',
+      folderPlaceholder: 'Inbox',
+      folderHint:
+        'A folder name, or a kind such as inbox or archive. Empty reads the inbox.',
+      senders: 'Only from these senders',
+      sendersPlaceholder: 'newsletter@example.com, @example.org',
+      sendersHint:
+        'Comma or line separated: a full address, an @domain, or part of a name. Empty keeps every sender.',
+      subjectKeywords: 'Only with these words in the subject',
+      subjectKeywordsPlaceholder: 'weekly, release',
+      subjectKeywordsHint:
+        'Comma or line separated, any one is enough. Empty keeps every subject.',
+      tooMany: 'Use at most {{max}} entries.',
+    },
+    push: {
+      open: 'Push & API',
+      title: 'Push links and posts',
+      description:
+        'Besides subscriptions, anything can be sent into your feed: a link NocoFeed reads for you, or a post with its own text. It lands under “Pushed” and is filtered and analysed like everything else.',
+      keysTitle: 'API keys',
+      keysDescription:
+        'A script or an extension authenticates with an API key in the x-api-key header. A key acts as you and can only add to your own feed; keep it secret.',
+      keyName: 'Key name',
+      keyNamePlaceholder: 'Browser bookmark',
+      keyExpiry: 'Valid for',
+      expiry: {
+        never: 'Never expires',
+        '7': '7 days',
+        '30': '30 days',
+        '90': '90 days',
+        '365': '1 year',
+      },
+      createKey: 'Create key',
+      keyHint:
+        'The full key is shown only once, right after it is created. A lost key is replaced, not recovered.',
+      createdTitle: 'Copy your new key now',
+      createdDescription:
+        'This is the only time it is shown. Store it where your script or extension can read it.',
+      noKeys: 'No API keys yet.',
+      inactive: 'Expired or disabled',
+      expires: 'Expires {{date}}',
+      revoke: 'Revoke',
+      confirmRevoke: 'Confirm revoke',
+      revokeFor: 'Revoke {{name}}',
+      revoked: 'Key “{{name}}” revoked.',
+      copy: 'Copy',
+      copied: 'Copied.',
+      copyFailed: 'Copying was refused. Select the text and copy it yourself.',
+      examplesTitle: 'Send something',
+      examplesDescription:
+        'POST JSON to this address. Send url alone and NocoFeed reads the page (YouTube, Bilibili, Xiaohongshu and X links through their own readers); send title and content to store a post as it is.',
+      examples: {
+        link: 'A link to read',
+        post: 'A post with its text',
+      },
+      answers:
+        'The answer is 201 with the new item, or 200 with duplicate: true when the same externalId, link or text was sent before. Bodies over 256 KB are refused.',
+      extensionTitle: 'Browser extension',
+      extensionDescription:
+        'A browser extension for saving the page you are on is planned. It will use this same address and an API key, so a key made here will work with it.',
     },
     targets: {
       reddit: { community: 'Communities' },

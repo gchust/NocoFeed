@@ -125,6 +125,13 @@ export interface CollectRequest {
    * it where the platform can; native lists are newest first and NocoFeed filters every answer by `publishedAt`.
    */
   since?: Date | null;
+  /**
+   * Whose subscription this is. Adapters reading the person's own data (mail, through the Mail plugin) read as this
+   * user only; public platforms ignore it.
+   */
+  ownerId?: string;
+  /** The subscription's own settings (`feedSources.options`), null when the platform has none. */
+  options?: Record<string, unknown> | null;
   signal: AbortSignal;
 }
 

@@ -28,6 +28,7 @@ import {
   FieldSet,
 } from '#components/ui/field';
 import { Input } from '#components/ui/input';
+import { Textarea } from '#components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group';
 import {
   Select,
@@ -43,6 +44,8 @@ import { useRouteOverlay } from '#components/use-route-overlay';
 
 import { frequencyText, requestProblem } from '../feed/format.js';
 import { type Catalog, PLATFORMS, type Source } from '../feed/types.js';
+import { MailAccountField } from './mail-fields.js';
+import { splitList } from './mail.js';
 import { FREQUENCIES, type SourcesOutletContext } from './types.js';
 
 const FORM_ID = 'feed-source-form';
@@ -124,6 +127,13 @@ function Body({
           .int(t('sources.validation.candidates'))
           .min(1, t('sources.validation.candidates'))
           .max(100, t('sources.validation.candidates')),
+        // Mail only: the folder and the filters, as the person types them (comma or line separated).
+        folder: z
+          .string()
+          .trim()
+          .max(100, t('feed.validation.tooLong', { max: 100 })),
+        senders: z.string().max(4_000),
+        subjectKeywords: z.string().max(2_000),
       }),
     [t],
   );
@@ -138,6 +148,9 @@ function Body({
       target: source?.target ?? '',
       frequency: source?.frequency ?? 60,
       candidateLimit: source?.candidateLimit ?? 20,
+      folder: source?.options?.folder ?? '',
+      senders: (source?.options?.senders ?? []).join(', '),
+      subjectKeywords: (source?.options?.subjectKeywords ?? []).join(', '),
     },
   });
 
@@ -150,11 +163,14 @@ function Body({
     (entry) => entry.operation === operation,
   );
   const needsTarget = operationSpec ? operationSpec.input !== 'none' : false;
+  const isAccount = operationSpec?.input === 'account';
 
   const validatedSubmit = form.handleSubmit(async (values) => {
     if (needsTarget && !values.target) {
       form.setError('target', {
-        message: t('sources.validation.targetRequired'),
+        message: isAccount
+          ? t('sources.mail.accountRequired')
+          : t('sources.validation.targetRequired'),
       });
       return;
     }
@@ -172,6 +188,23 @@ function Body({
       return;
     }
     const target = needsTarget ? values.target : '';
+    const options = isAccount
+      ? {
+          folder: values.folder || null,
+          senders: splitList(values.senders, 200),
+          subjectKeywords: splitList(values.subjectKeywords, 100),
+        }
+      : undefined;
+    if (
+      options &&
+      (options.senders.length > 20 || options.subjectKeywords.length > 20)
+    ) {
+      form.setError(
+        options.senders.length > 20 ? 'senders' : 'subjectKeywords',
+        { message: t('sources.mail.tooMany', { max: 20 }) },
+      );
+      return;
+    }
     try {
       const { data } = await api.request<{ data: Source }>(
         source
@@ -183,6 +216,7 @@ function Body({
                 target,
                 frequency: values.frequency,
                 candidateLimit: values.candidateLimit,
+                ...(options ? { options } : {}),
               },
             }
           : {
@@ -195,6 +229,7 @@ function Body({
                 target,
                 frequency: values.frequency,
                 candidateLimit: values.candidateLimit,
+                ...(options ? { options } : {}),
               },
             },
       );
@@ -386,7 +421,77 @@ function Body({
             {t('sources.hints.collectorNeeded')}
           </p>
         ) : null}
-        {needsTarget ? (
+        {isAccount ? (
+          <Controller
+            control={form.control}
+            name='target'
+            render={({ field, fieldState }) => (
+              <MailAccountField
+                id={`${FORM_ID}-target`}
+                value={field.value}
+                invalid={fieldState.invalid}
+                error={fieldState.error}
+                onChange={(account) => {
+                  field.onChange(account.id);
+                  if (!form.getValues('name'))
+                    form.setValue('name', account.address.slice(0, 60));
+                }}
+              />
+            )}
+          />
+        ) : null}
+        {isAccount ? (
+          <>
+            <Controller
+              control={form.control}
+              name='folder'
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid}>
+                  <FieldLabel htmlFor={`${FORM_ID}-folder`}>
+                    {t('sources.mail.folder')}
+                  </FieldLabel>
+                  <Input
+                    {...field}
+                    id={`${FORM_ID}-folder`}
+                    autoComplete='off'
+                    aria-invalid={fieldState.invalid}
+                    placeholder={t('sources.mail.folderPlaceholder')}
+                  />
+                  <FieldDescription>
+                    {t('sources.mail.folderHint')}
+                  </FieldDescription>
+                  <FieldError errors={[fieldState.error]} />
+                </Field>
+              )}
+            />
+            {(['senders', 'subjectKeywords'] as const).map((name) => (
+              <Controller
+                key={name}
+                control={form.control}
+                name={name}
+                render={({ field, fieldState }) => (
+                  <Field data-invalid={fieldState.invalid}>
+                    <FieldLabel htmlFor={`${FORM_ID}-${name}`}>
+                      {t(`sources.mail.${name}`)}
+                    </FieldLabel>
+                    <Textarea
+                      {...field}
+                      id={`${FORM_ID}-${name}`}
+                      rows={2}
+                      aria-invalid={fieldState.invalid}
+                      placeholder={t(`sources.mail.${name}Placeholder`)}
+                    />
+                    <FieldDescription>
+                      {t(`sources.mail.${name}Hint`)}
+                    </FieldDescription>
+                    <FieldError errors={[fieldState.error]} />
+                  </Field>
+                )}
+              />
+            ))}
+          </>
+        ) : null}
+        {needsTarget && !isAccount ? (
           <Controller
             control={form.control}
             name='target'
