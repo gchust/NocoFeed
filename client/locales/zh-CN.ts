@@ -372,6 +372,31 @@ const zhCN: AppResource = {
       showOriginal: '显示原文',
       showTranslation: '显示译文',
     },
+    // 详情里的“参与”回复草稿（`replies.tsx`、`server/providers/feed/replies.ts`）。
+    replies: {
+      title: '参与讨论',
+      language: '回复语言：{{language}}',
+      write: '写回复草稿',
+      again: '换一批',
+      writing: '正在后台生成回复草稿…',
+      failed: '回复草稿生成失败：没有可用的 AI 模型，或模型没有给出有效回答。',
+      noModel: '需要先在系统设置里配置 AI 模型，才能生成回复草稿。',
+      noneDiscussion: '讨论类条目会在后台自动生成回复草稿，也可以现在就生成。',
+      noneOther: '想参与这条？可以按需生成几条可直接复制的回复。',
+      guidelinesChanged:
+        '回复准则已修改，这些草稿按旧准则生成；点“换一批”按新准则重写。',
+      stale: '内容已更新，这些草稿基于之前的版本。',
+      copy: '复制',
+      copyNumber: '复制第 {{number}} 条回复',
+      copied: '已复制回复',
+      copiedHint: '发出去之后，可以把这条标记为已参与。',
+      copyFailed: '无法复制，请手动选中文字复制。',
+      markJoined: '标记为已参与',
+      emoji: '表情：{{emoji}}',
+      image: '配图建议：{{idea}}',
+      rulesHint: '草稿使用原帖所在网站的语言和风格，并遵循你的回复准则。',
+      editRules: '修改回复准则',
+    },
     // 详情里的“追问”（`ask.tsx`、`server/providers/feed/ask.ts`）。
     ask: {
       title: '追问',
@@ -1017,6 +1042,23 @@ const zhCN: AppResource = {
       day: '最近 24 小时',
       days: '最近 {{count}} 天',
       unlimited: '不限',
+    },
+    // 回复草稿的准则（`reply-guidelines.tsx`），与上面的表单分开保存。
+    replies: {
+      title: '参与风格',
+      description:
+        '生成回复草稿时遵循的准则。回复总是使用原帖所在网站的语言，与阅读语言无关。可以随时调整、测试效果。',
+      general: '回复准则',
+      generalHint:
+        '清空或恢复默认后保存，即使用默认准则。保存后对之后生成（或“换一批”）的草稿生效。',
+      platforms: '按平台补充准则',
+      platformsHint:
+        '只对该平台的帖子生效，追加在通用准则之后。留空表示只用通用准则。',
+      platformPlaceholder: '例如：多用梗，控制在 100 字以内',
+      reset: '恢复默认',
+      save: '保存准则',
+      saved: '回复准则已保存',
+      savedHint: '之后生成的回复草稿会使用新准则。',
     },
     agent: {
       none: '不使用：由 AI 模型和规则分析',

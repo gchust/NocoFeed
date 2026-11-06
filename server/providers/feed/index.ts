@@ -19,6 +19,7 @@ import { ASK_THREAD, ASK_TRIGGER, createFeedAsk, type FeedAsk } from './ask.js';
 import { createIngest, type FeedIngest } from './ingest.js';
 import { createMailCollector, withMail, type MailCollector } from './mail.js';
 import { readPageText } from './page.js';
+import { createFeedReplies, type FeedReplies } from './replies.js';
 import { createRescoreJob } from './rescore-job.js';
 import { createFeedService, type FeedService } from './service.js';
 
@@ -26,6 +27,7 @@ export type { FeedService } from './service.js';
 export type { FeedAsk } from './ask.js';
 export type { FeedIngest } from './ingest.js';
 export type { MailCollector } from './mail.js';
+export type { FeedReplies } from './replies.js';
 export { FeedError } from './service.js';
 
 export const feedServiceToken: ServiceToken<FeedService> =
@@ -42,6 +44,10 @@ export const feedIngestToken: ServiceToken<FeedIngest> =
 /** Mail subscriptions: the person's own accounts, read through the Mail plugin (`mail.ts`). */
 export const feedMailToken: ServiceToken<MailCollector> =
   createServiceToken<MailCollector>('nocofeed/feed-mail');
+
+/** Reply drafts to copy when joining a discussion (`replies.ts`, issue #15). */
+export const feedRepliesToken: ServiceToken<FeedReplies> =
+  createServiceToken<FeedReplies>('nocofeed/feed-replies');
 
 const feedAdaptersToken: ServiceToken<Adapters> = createServiceToken<Adapters>(
   'nocofeed/feed-adapters',
@@ -110,6 +116,20 @@ export default class FeedProvider extends ServiceProvider<Application> {
           readPageText(url, { signal, userAgent: config().userAgent }),
         fetchParts: (ownerId, itemId, want) =>
           feed().fetchParts(ownerId, itemId, want),
+        log: (level, message, context) =>
+          logger()[level]({ ...context }, message),
+      });
+    });
+    this.app.container.singleton(feedRepliesToken, () => {
+      const feed = () => this.app.container.resolve(feedServiceToken);
+      return createFeedReplies({
+        database: this.app.container.resolve(databaseManagerToken),
+        agents: () =>
+          this.app.container.has(agentsToken)
+            ? this.app.container.resolve(agentsToken)
+            : undefined,
+        getItem: (ownerId, id) => feed().getItem(ownerId, id),
+        getProfile: (ownerId) => feed().getProfile(ownerId),
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });
@@ -215,6 +235,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         await feed.refreshHeat();
         // Briefs in the person's reading language for what the feed shows, a few per tick.
         await feed.briefPending();
+        // Reply drafts in the post's own language for recent discussions, a few per tick.
+        await this.app.container.resolve(feedRepliesToken).pending();
       },
     });
     await this.executor.addJob({

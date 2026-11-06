@@ -48,6 +48,7 @@ import { BriefMarkdown } from './brief.js';
 import { ArticleText, MediaGallery } from './content.js';
 import { noteText, relativeTime, requestProblem } from './format.js';
 import { ItemTime, LoadProblem, PlatformBadge, VerdictBadge } from './parts.js';
+import { ReplyDrafts } from './replies.js';
 import type {
   FeedItem,
   ItemState,
@@ -764,6 +765,18 @@ export function ItemDetail({
           </section>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Replies to copy, in the post's own language (issue #15). */}
+      <ReplyDrafts
+        key={`replies-${item.id}`}
+        itemId={item.id}
+        worthJoining={
+          analysis?.verdict === 'discuss' ||
+          Boolean(item.state.participationUrl)
+        }
+        participated={item.state.participated}
+        onMarkJoined={() => mark({ participated: true })}
+      />
 
       {/* The original follows, folded while a brief says what it says. */}
       <Collapsible

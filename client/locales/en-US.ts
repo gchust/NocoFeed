@@ -396,6 +396,36 @@ const enUS = {
       showOriginal: 'Show original',
       showTranslation: 'Show translation',
     },
+    // Reply drafts on the detail (`replies.tsx`, `server/providers/feed/replies.ts`).
+    replies: {
+      title: 'Join the discussion',
+      language: 'Replies in {{language}}',
+      write: 'Write replies',
+      again: 'New batch',
+      writing: 'Writing reply drafts in the background…',
+      failed:
+        'Reply drafts could not be written: no AI model is available, or it gave no usable answer.',
+      noModel:
+        'Configure an AI model in System settings to write reply drafts.',
+      noneDiscussion:
+        'Discussions get reply drafts in the background; you can also write them now.',
+      noneOther:
+        'Want to join in? Write a few replies you can copy as they are.',
+      guidelinesChanged:
+        'Your reply rules changed since these were written; "New batch" writes them under the new rules.',
+      stale: 'The content changed; these drafts are from an earlier version.',
+      copy: 'Copy',
+      copyNumber: 'Copy reply {{number}}',
+      copied: 'Reply copied',
+      copiedHint: 'Once you have posted it, you can mark the item as joined.',
+      copyFailed: 'Could not copy; select the text and copy it yourself.',
+      markJoined: 'Mark as joined',
+      emoji: 'Emoji: {{emoji}}',
+      image: 'Picture idea: {{idea}}',
+      rulesHint:
+        "Drafts use the language and style of the post's own site and follow your reply rules.",
+      editRules: 'Edit reply rules',
+    },
     // "Ask about this item" on the detail (`ask.tsx`, `server/providers/feed/ask.ts`).
     ask: {
       title: 'Ask about this item',
@@ -1075,6 +1105,23 @@ const enUS = {
       day: 'The past 24 hours',
       days: 'The past {{count}} days',
       unlimited: 'Any time',
+    },
+    // Rules for reply drafts (`reply-guidelines.tsx`), saved apart from the form above.
+    replies: {
+      title: 'Reply style',
+      description:
+        "The rules reply drafts follow. Replies are always in the language of the post's own site, whatever your reading language. Adjust them whenever you like and try the result.",
+      general: 'Reply rules',
+      generalHint:
+        'Save it empty or reset to follow the default. Saved rules apply to drafts written afterwards (or on "New batch").',
+      platforms: 'Rules for one platform',
+      platformsHint:
+        "Only for that platform's posts, added after the general rules. Leave empty to use the general rules alone.",
+      platformPlaceholder: 'For example: more memes, under 100 words',
+      reset: 'Reset to default',
+      save: 'Save rules',
+      saved: 'Reply rules saved',
+      savedHint: 'Reply drafts written from now on follow them.',
     },
     agent: {
       none: 'None: use the AI model and the rules',
