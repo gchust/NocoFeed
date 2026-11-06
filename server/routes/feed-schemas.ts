@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const PLATFORM = z.enum([
+const PUBLIC_PLATFORMS = [
   'reddit',
   'hn',
   'rss',
@@ -8,7 +8,11 @@ const PLATFORM = z.enum([
   'bilibili',
   'xiaohongshu',
   'x',
-]);
+] as const;
+/** Every platform an item or subscription can have: the public ones, the person's mail and the push inbox. */
+const PLATFORM = z.enum([...PUBLIC_PLATFORMS, 'mail', 'inbox']);
+/** Platforms a topic can search. */
+const SEARCH_PLATFORM = z.enum(PUBLIC_PLATFORMS);
 const NOISE = z.enum(['none', 'promo', 'routine', 'roundup', 'hype', 'teaser']);
 const GATE = z.enum(['prefilter', 'awaitingMaterial']);
 const MODE = z.enum(['both', 'participate', 'learn']);
@@ -128,11 +132,41 @@ export const FeedSourceSchema = z
       description:
         'failing after several failed runs in a row; quiet when nothing new has arrived for days',
     }),
+    options: z.record(z.string(), z.unknown()).nullable().meta({
+      description:
+        "The platform's own settings: for mail, the folder and the sender and subject filters; null otherwise",
+    }),
   })
   .meta({ ref: 'FeedSource' });
 
 const FREQUENCY = z.number().int().min(15).max(10_080);
 const CANDIDATES = z.number().int().min(1).max(100);
+
+/** A mail subscription's folder and filters; the target is the id of one of the caller's connected mail accounts. */
+export const MailSourceOptions = z
+  .strictObject({
+    folder: z.string().trim().max(100).nullable().optional().meta({
+      description:
+        'Folder type (inbox, archive, …) or name to read; empty reads the inbox',
+    }),
+    senders: z
+      .array(z.string().trim().min(1).max(200))
+      .max(20)
+      .optional()
+      .meta({
+        description:
+          'Keep messages from these senders only: a full address, an @domain, or part of the address or name',
+      }),
+    subjectKeywords: z
+      .array(z.string().trim().min(1).max(100))
+      .max(20)
+      .optional()
+      .meta({
+        description:
+          'Keep messages whose subject contains one of these, ignoring case',
+      }),
+  })
+  .meta({ ref: 'FeedMailSourceOptions' });
 
 export const CreateSourceBody = z.strictObject({
   platform: PLATFORM,
@@ -142,6 +176,7 @@ export const CreateSourceBody = z.strictObject({
   frequency: FREQUENCY,
   candidateLimit: CANDIDATES.default(20),
   topicIds: z.array(z.number().int().positive()).max(50).optional(),
+  options: MailSourceOptions.nullable().optional(),
 });
 
 export const UpdateSourceBody = z.strictObject({
@@ -150,13 +185,14 @@ export const UpdateSourceBody = z.strictObject({
   frequency: FREQUENCY.optional(),
   candidateLimit: CANDIDATES.optional(),
   active: z.boolean().optional(),
+  options: MailSourceOptions.nullable().optional(),
 });
 
 // Topics
 
 /** Terms a topic searches for itself; each runs on every chosen platform. */
 const SEARCH_TERMS = z.array(z.string().trim().min(1).max(200)).max(10);
-const SEARCH_PLATFORMS = z.array(PLATFORM).max(10);
+const SEARCH_PLATFORMS = z.array(SEARCH_PLATFORM).max(10);
 
 export const FeedTopicSchema = z
   .object({
@@ -170,7 +206,7 @@ export const FeedTopicSchema = z
         'Subscriptions the topic is limited to; empty means it judges what every subscription brings',
     }),
     searchTerms: z.array(z.string()),
-    searchPlatforms: z.array(PLATFORM).meta({
+    searchPlatforms: z.array(SEARCH_PLATFORM).meta({
       description:
         'Platforms to search on; empty means every platform that can search',
     }),
@@ -231,7 +267,7 @@ export const FeedCatalogSchema = z
           z.object({
             operation: z.string(),
             implementation: z.enum(['native', 'collector']),
-            input: z.enum(['text', 'url', 'none']),
+            input: z.enum(['text', 'url', 'none', 'account']),
             single: z.boolean(),
             capabilities: z.array(z.string()).readonly(),
             targetLength: z

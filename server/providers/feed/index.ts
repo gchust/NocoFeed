@@ -2,6 +2,7 @@ import type { Application } from '@nocobase/app-server/application';
 import { jobExecutorServiceToken } from '@nocobase/app-server/jobs';
 import { loggingToken } from '@nocobase/app-server/logging';
 import { agentsToken } from '@nocobase/app-plugin-agents/server/tokens';
+import { mailServiceToken } from '@nocobase/app-plugin-mail/server';
 import { notificationServiceToken } from '@nocobase/app-plugin-notification/server';
 import { databaseManagerToken } from '@nocobase/db';
 import type { JobExecutor, ScheduleExecutor } from '@nocobase/jobs';
@@ -12,7 +13,7 @@ import {
 } from '@nocobase/service-provider';
 
 import type { FeedConfig } from '../../config/feed.js';
-import { createAdapters } from './adapters.js';
+import { createAdapters, type Adapters } from './adapters.js';
 import { feedItemSubject } from './agent-reader.js';
 import {
   ASK_THREAD,
@@ -21,11 +22,15 @@ import {
   fetchPageText,
   type FeedAsk,
 } from './ask.js';
+import { createIngest, type FeedIngest } from './ingest.js';
+import { createMailCollector, withMail, type MailCollector } from './mail.js';
 import { createRescoreJob } from './rescore-job.js';
 import { createFeedService, type FeedService } from './service.js';
 
 export type { FeedService } from './service.js';
 export type { FeedAsk } from './ask.js';
+export type { FeedIngest } from './ingest.js';
+export type { MailCollector } from './mail.js';
 export { FeedError } from './service.js';
 
 export const feedServiceToken: ServiceToken<FeedService> =
@@ -34,6 +39,18 @@ export const feedServiceToken: ServiceToken<FeedService> =
 /** Questions about one item (`ask.ts`): the online agent's conversation and the runner agent's deeper look. */
 export const feedAskToken: ServiceToken<FeedAsk> =
   createServiceToken<FeedAsk>('nocofeed/feed-ask');
+
+/** `POST /feedItems/ingest`: links and posts pushed into the person's own feed (`ingest.ts`). */
+export const feedIngestToken: ServiceToken<FeedIngest> =
+  createServiceToken<FeedIngest>('nocofeed/feed-ingest');
+
+/** Mail subscriptions: the person's own accounts, read through the Mail plugin (`mail.ts`). */
+export const feedMailToken: ServiceToken<MailCollector> =
+  createServiceToken<MailCollector>('nocofeed/feed-mail');
+
+const feedAdaptersToken: ServiceToken<Adapters> = createServiceToken<Adapters>(
+  'nocofeed/feed-adapters',
+);
 
 /**
  * Binds the feed service and runs the subscription schedule: every few minutes it collects the subscriptions whose own
@@ -58,11 +75,34 @@ export default class FeedProvider extends ServiceProvider<Application> {
   private unregisterAsk: (() => void) | undefined;
 
   public override register(): void {
+    const config = () => this.app.config.get<FeedConfig>('feed')!;
+    const logger = () =>
+      this.app.container.resolve(loggingToken).getLogger('nocofeed');
+    this.app.container.singleton(feedMailToken, () =>
+      // Read as the subscription's owner; absent when the Mail plugin is not registered.
+      createMailCollector(() =>
+        this.app.container.has(mailServiceToken)
+          ? this.app.container.resolve(mailServiceToken)
+          : undefined,
+      ),
+    );
+    this.app.container.singleton(feedAdaptersToken, () =>
+      withMail(
+        createAdapters(config),
+        this.app.container.resolve(feedMailToken),
+      ),
+    );
+    this.app.container.singleton(feedIngestToken, () =>
+      createIngest({
+        database: this.app.container.resolve(databaseManagerToken),
+        adapters: this.app.container.resolve(feedAdaptersToken),
+        feed: () => this.app.container.resolve(feedServiceToken),
+        userAgent: () => config().userAgent,
+        log: (level, message, context) =>
+          logger()[level]({ ...context }, message),
+      }),
+    );
     this.app.container.singleton(feedAskToken, () => {
-      const config = () => this.app.config.get<FeedConfig>('feed')!;
-      const logger = this.app.container
-        .resolve(loggingToken)
-        .getLogger('nocofeed');
       const feed = () => this.app.container.resolve(feedServiceToken);
       return createFeedAsk({
         agents: () =>
@@ -74,17 +114,16 @@ export default class FeedProvider extends ServiceProvider<Application> {
         readPage: (url, signal) =>
           fetchPageText(url, signal, config().userAgent),
         log: (level, message, context) =>
-          logger[level]({ ...context }, message),
+          logger()[level]({ ...context }, message),
       });
     });
     this.app.container.singleton(feedServiceToken, () => {
-      const config = () => this.app.config.get<FeedConfig>('feed')!;
-      const logger = this.app.container
-        .resolve(loggingToken)
-        .getLogger('nocofeed');
+      const log = logger();
+      const mail = this.app.container.resolve(feedMailToken);
       return createFeedService({
         database: this.app.container.resolve(databaseManagerToken),
-        adapters: createAdapters(config),
+        adapters: this.app.container.resolve(feedAdaptersToken),
+        mailAccounts: (ownerId) => mail.accounts(ownerId),
         agents: () =>
           this.app.container.has(agentsToken)
             ? this.app.container.resolve(agentsToken)
@@ -111,8 +150,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
             });
           return result.status !== 'failed';
         },
-        log: (level, message, context) =>
-          logger[level]({ ...context }, message),
+        log: (level, message, context) => log[level]({ ...context }, message),
         deferRescore: async (task) => {
           // Before start() has set the executor up, the service runs the re-score detached itself.
           if (!this.jobs) throw new Error('The job executor is not set up.');

@@ -14,6 +14,8 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611070001_feed_time_window.ts` (`feedProfiles.maxAgeDays`, `feedItems.timelineAt`).
   `202611080001_feed_run_window.ts` (`feedRuns.windowFilter`/`windowScanned`: how the Collector applied the window).
   `202611080002_feed_read_state.ts` (`feedItemStates.readAt`, see "Read state" below).
+  `202611200001_feed_source_options.ts` (`feedSources.options`: a mail subscription's folder and filters, see "Mail
+  and push" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -28,6 +30,38 @@ the person's topics and experience, and the person keeps their own marks and not
   30 s public-platform limit, a `401`/`403` from the Collector is `collectorUnauthorized`, and long external ids are
   stored as `storedExternalId` hashes. Its tests are `tests/server/feed-collector-client.test.ts`; the reference
   Collector is the private `gchust/feed-collector`.
+
+## Mail and push
+
+Two ways in that are not public platforms (issue #13); both are the person's own, scoped by `ownerId` like the rest.
+
+- **Mail** (`platform` `mail`, operation `messages`, `input: 'account'` in `catalog.ts`) reads one of the person's
+  accounts through the Mail plugin (`mail.ts`): `MailService` resolved from `mailServiceToken`, always with
+  `actorId` = the subscription's owner, using only `listAccounts`, `listFolders`, `listMessages` and `getMessage` — so
+  collecting never marks, moves or deletes anything, and another person's account id reads nothing. `target` is the
+  Mail account id, `feedSources.options` holds `folder` (type or name; empty = inbox), `senders` and
+  `subjectKeywords`. Messages come newest first and stop at the run's `since`, so the time window works as for any
+  list; the filters apply locally. Each message becomes an item: Message-ID as `externalId` (else
+  `mail:<account>:<id>`), subject as title, plain text or cleaned HTML as body, sender as author, received time as
+  `publishedAt`. The Mail plugin syncs mailboxes on its own schedule; a NocoFeed run reads what it has synced. `withMail`
+  wraps the adapters, `deps.mailAccounts` checks a new subscription's account belongs to the caller
+  (`FEED_MAIL_ACCOUNT_MISSING`). People connect accounts at `/mail/accounts` (the plugin's `MailAccountsPage`, behind
+  its `mail.workspace` page grant; `mail.oauthReturnUrl` points there). `GET /feedMailAccounts` lists the caller's own.
+- **Push** (`POST /feedItems/ingest`, `server/routes/feed-ingest.ts`, `ingest.ts`) stores what a script, a bookmark or
+  a future browser extension sends into the person's push inbox: one `feedSources` row with `platform` `inbox`, made
+  on the first push, `active: false` and never due, hidden from `/feedSources`; run/PATCH/DELETE on it answer
+  `FEED_PUSH_SOURCE`. A `url` alone is read: YouTube/Bilibili/Xiaohongshu/X single items through their adapters
+  (`platformOfUrl`), anything else as an article (`page.ts`: public http(s) addresses only, every redirect checked
+  again, 2 MB, HTML or text); a link that cannot be read is still kept with the failure on its coverage. `title` and
+  `content` store a post as sent. Duplicates (by `externalId`, else the link — any platform's item with the same link —
+  else a hash of title and text) answer 200 `duplicate: true`. Items are `platform` `inbox`; the prefilter and the
+  analysis run in the background. The route takes a session or an API key (`x-api-key`, the API Keys plugin), refuses
+  bodies over 256 KB (413) and never takes an owner from the request. `/sources/push` explains it with curl examples
+  and manages the person's API keys.
+- Tests: `tests/server/feed-mail-source.test.ts` (fake `MailService`; filters, window, dedupe, read-only, isolation),
+  `tests/server/feed-ingest.test.ts` (page extraction, address checks, platform links, dedupe),
+  `tests/server/feed-ingest-routes.test.ts` (session, API key, unauthenticated, other people, size, validation),
+  `tests/database/feed-source-options-migration.test.ts`, `tests/client/sources-mail-push.test.tsx`.
 
 ## Engagement
 

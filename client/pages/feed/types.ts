@@ -12,8 +12,27 @@ export const PLATFORMS = [
   'bilibili',
   'xiaohongshu',
   'x',
+  // The person's own mailbox (a subscription to a connected mail account) and what they push to `feedItems/ingest`.
+  'mail',
+  'inbox',
 ] as const;
 export type Platform = (typeof PLATFORMS)[number];
+
+/** A mail subscription's folder and filters (`Source.options`). */
+export interface MailSourceOptions {
+  readonly folder?: string | null;
+  readonly senders?: readonly string[];
+  readonly subjectKeywords?: readonly string[];
+}
+
+/** One of the person's connected mail accounts (`GET /feedMailAccounts`). */
+export interface MailAccount {
+  readonly id: string;
+  readonly address: string;
+  readonly displayName: string | null;
+  readonly provider: string;
+  readonly status: string;
+}
 
 // `digest` is shown by the page itself (from `feedDigest`); the others are views of `feedItems`.
 export const VIEWS = [
@@ -146,12 +165,15 @@ export interface Source {
   readonly failureStreak: number;
   readonly emptyStreak: number;
   readonly health: 'ok' | 'failing' | 'quiet';
+  /** The platform's own settings: for mail, the folder and filters; null otherwise. */
+  readonly options?: MailSourceOptions | null;
 }
 
 export interface CatalogOperation {
   readonly operation: string;
   readonly implementation: 'native' | 'collector';
-  readonly input: 'text' | 'url' | 'none';
+  /** `account` is one of the person's connected mail accounts. */
+  readonly input: 'text' | 'url' | 'none' | 'account';
   readonly single: boolean;
   readonly capabilities: readonly string[];
   readonly targetLength: { readonly min: number; readonly max: number } | null;

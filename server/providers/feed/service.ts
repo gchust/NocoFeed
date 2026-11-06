@@ -53,9 +53,11 @@ import type { GoldCase } from './evaluation.js';
 import {
   CATALOG,
   findOperation,
+  INBOX_PLATFORM,
   SEARCH_PLATFORMS,
   type Platform,
 } from './catalog.js';
+import { mailOptions } from './mail.js';
 import {
   HEAT_WINDOW_MS,
   HOT_HEAT,
@@ -173,6 +175,8 @@ export interface Source {
   emptyStreak: number;
   /** `failing` after several failed runs in a row, `quiet` when nothing new has arrived for days. */
   health: SourceHealth;
+  /** The platform's own settings (a mail subscription's folder and filters); null when it has none. */
+  options: Record<string, unknown> | null;
 }
 
 export interface FollowUp {
@@ -451,7 +455,7 @@ export interface CatalogEntry {
   operations: {
     operation: string;
     implementation: 'native' | 'collector';
-    input: 'text' | 'url' | 'none';
+    input: 'text' | 'url' | 'none' | 'account';
     single: boolean;
     capabilities: readonly string[];
     targetLength: { min: number; max: number } | null;
@@ -659,6 +663,13 @@ export interface FeedServiceDeps {
   config: () => FeedConfig;
   /** Sends an in-app notice; resolves false when notifications are not available. */
   notify: (notice: Notice) => Promise<boolean>;
+  /**
+   * The person's connected mail accounts (Mail plugin), to check a mail subscription's target; null when the plugin is
+   * not there. Absent means mail subscriptions cannot be made.
+   */
+  mailAccounts?: (
+    ownerId: string,
+  ) => Promise<readonly { id: string; status: string }[] | null>;
   log: (
     level: 'info' | 'warn' | 'error',
     message: string,
@@ -1118,6 +1129,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     nextRunAt: iso(row.nextRunAt),
     failureStreak: Number(row.failureStreak ?? 0),
     emptyStreak: Number(row.emptyStreak ?? 0),
+    options: json<Record<string, unknown> | null>(row.options, null),
     health: sourceHealth({
       failureStreak: Number(row.failureStreak ?? 0),
       emptyStreak: Number(row.emptyStreak ?? 0),
@@ -1131,8 +1143,9 @@ export function createFeedService(deps: FeedServiceDeps) {
 
   /** The subscriptions the person made; a topic's searches are listed with the topic. */
   async function listSources(ownerId: string): Promise<Source[]> {
+    // The push inbox is not a subscription: it is described with the ingest API instead.
     return (await allSources(ownerId)).filter(
-      (source) => source.topicId == null,
+      (source) => source.topicId == null && source.platform !== INBOX_PLATFORM,
     );
   }
 
@@ -1148,6 +1161,8 @@ export function createFeedService(deps: FeedServiceDeps) {
   async function requireDirectSource(ownerId: string, id: number) {
     const row = await requireRow('feedSources', ownerId, id);
     if (row.topicId != null) throw new FeedError('invalid', 'managedByTopic');
+    if (row.platform === INBOX_PLATFORM)
+      throw new FeedError('invalid', 'pushSource');
     return row;
   }
 
@@ -1162,6 +1177,8 @@ export function createFeedService(deps: FeedServiceDeps) {
     if (spec.operation.input === 'none')
       return value || `${platform}:${operation}`;
     if (!value) throw new FeedError('invalid', 'targetRequired');
+    if (spec.operation.input === 'account' && value.length > 191)
+      throw new FeedError('invalid', 'targetLength');
     if (spec.operation.input === 'url' && !/^https?:\/\/\S+$/i.test(value))
       throw new FeedError('invalid', 'targetMustBeUrl');
     const length = spec.operation.targetLength;
@@ -1173,6 +1190,25 @@ export function createFeedService(deps: FeedServiceDeps) {
     )
       throw new FeedError('invalid', 'targetLength');
     return value;
+  }
+
+  /**
+   * The options stored with a subscription: a mail subscription's folder and filters, after checking that its target is
+   * one of the person's own connected accounts; nothing for every other platform.
+   */
+  async function sourceOptions(
+    ownerId: string,
+    platform: string,
+    target: string,
+    options: Record<string, unknown> | null | undefined,
+  ): Promise<Record<string, unknown> | null> {
+    if (platform !== 'mail') return null;
+    const accounts = await deps.mailAccounts?.(ownerId);
+    if (!accounts) throw new FeedError('invalid', 'mailUnavailable');
+    const account = accounts.find((entry) => entry.id === target);
+    if (!account || account.status === 'removing')
+      throw new FeedError('invalid', 'mailAccountMissing');
+    return { ...mailOptions(options) };
   }
 
   async function createSource(
@@ -1187,12 +1223,19 @@ export function createFeedService(deps: FeedServiceDeps) {
       | 'candidateLimit'
     > & {
       topicIds?: number[];
+      options?: Record<string, unknown> | null;
     },
   ): Promise<Source> {
     const target = validateSource(
       input.platform,
       input.operation,
       input.target,
+    );
+    const options = await sourceOptions(
+      ownerId,
+      input.platform,
+      target,
+      input.options,
     );
     const now = new Date();
     const created = await database.transaction(async (connection) => {
@@ -1205,6 +1248,7 @@ export function createFeedService(deps: FeedServiceDeps) {
           target,
           frequency: input.frequency,
           candidateLimit: input.candidateLimit,
+          options,
           active: true,
           status: 'pending',
           nextRunAt: now,
@@ -1239,7 +1283,12 @@ export function createFeedService(deps: FeedServiceDeps) {
     input: Partial<
       Pick<
         Source,
-        'name' | 'target' | 'frequency' | 'candidateLimit' | 'active'
+        | 'name'
+        | 'target'
+        | 'frequency'
+        | 'candidateLimit'
+        | 'active'
+        | 'options'
       >
     >,
   ): Promise<Source> {
@@ -1254,6 +1303,16 @@ export function createFeedService(deps: FeedServiceDeps) {
       );
       if (values.target !== current.target) values.cursor = null;
     }
+    if (
+      current.platform === 'mail' &&
+      (input.target !== undefined || input.options !== undefined)
+    )
+      values.options = await sourceOptions(
+        ownerId,
+        current.platform,
+        (values.target as string | undefined) ?? current.target,
+        input.options === undefined ? current.options : input.options,
+      );
     if (input.frequency !== undefined) values.frequency = input.frequency;
     if (input.candidateLimit !== undefined)
       values.candidateLimit = input.candidateLimit;
@@ -1404,6 +1463,8 @@ export function createFeedService(deps: FeedServiceDeps) {
   ): Promise<Run> {
     const sourceRow = await requireRow('feedSources', ownerId, sourceId);
     const source = toSource(sourceRow);
+    if (source.platform === INBOX_PLATFORM)
+      throw new FeedError('invalid', 'pushSource');
     if (running.has(sourceId)) throw new FeedError('busy', 'sourceRunning');
     running.add(sourceId);
     const runId = await startRun({
@@ -1448,6 +1509,8 @@ export function createFeedService(deps: FeedServiceDeps) {
         cursor: json<Record<string, unknown> | null>(sourceRow.cursor, null),
         knownIds,
         since: window?.since ?? null,
+        ownerId,
+        options: source.options,
         signal: AbortSignal.timeout(MAX_RUN_MS),
       });
       const result = window
@@ -4082,7 +4145,10 @@ export function createFeedService(deps: FeedServiceDeps) {
           single: Boolean(op.single),
           capabilities: op.capabilities,
           targetLength: op.targetLength ?? null,
-          available: op.implementation === 'native' || collector,
+          available:
+            spec.platform === 'mail'
+              ? Boolean(deps.mailAccounts)
+              : op.implementation === 'native' || collector,
         })),
       })),
     };
@@ -4103,6 +4169,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     deleteSource,
     runSource,
     runDue,
+    analyzeItems,
     listRuns,
     listItems,
     getItem,

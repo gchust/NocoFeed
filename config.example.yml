@@ -231,8 +231,26 @@ snowflake:
 
 # Mail is registered by default. Configure mailbox provider instances before connecting accounts.
 # See .agents/skills/nocobase-app-plugin-mail/references/configuration-and-accounts.md.
+# People connect their accounts at /mail/accounts (it needs the mail.workspace page grant) and follow them as "Mail"
+# subscriptions. OAuth providers redirect to <origin><base path>/mail/oauth/callback; register that exact URL with
+# Google or Microsoft, and keep the secrets out of committed files.
 mail:
+  oauthCallbackUrl: /mail/oauth/callback
+  oauthReturnUrl: /mail/accounts
   providers: {}
+  # providers:
+  #   google:
+  #     type: gmail
+  #     clientId: replace-with-google-oauth-client-id
+  #     clientSecret: replace-with-google-oauth-client-secret
+  #   microsoft-365:
+  #     type: microsoft
+  #     clientId: replace-with-microsoft-entra-client-id
+  #     clientSecret: replace-with-microsoft-entra-client-secret
+  #   company-mail:
+  #     type: imap-smtp
+  #     imap: { host: imap.example.com, port: 993, secure: true }
+  #     smtp: { host: smtp.example.com, port: 465, secure: true }
 
 # File logging is independent of terminal formatting.
 logging:
