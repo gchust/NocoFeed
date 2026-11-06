@@ -64,6 +64,9 @@ const enUS = {
     searchLabel: 'Search the feed',
     scoreValue: 'Match {{score}}',
     qualityValue: 'Value {{quality}}',
+    heatValue: 'Heat {{heat}}',
+    heatHint:
+      'Attention on its own platform (likes, comments and views weighed, 0–100). It says how many are looking, not whether it is worth reading',
     noise: {
       none: '',
       promo: 'Promotion',
@@ -80,6 +83,8 @@ const enUS = {
       label: 'Views',
       digest: 'Today',
       all: 'All',
+      hot: 'Trending',
+      solid: 'In depth',
       discuss: 'Join in',
       learn: 'Learn',
       saved: 'Saved',
@@ -152,13 +157,15 @@ const enUS = {
     digest: {
       title: 'Today’s digest',
       description:
-        'The three best discussions to join and the best thing to learn from, among what arrived in the last 24 hours. It is also sent to your inbox once a day.',
+        'The three hottest recommendations, the three best discussions to join and the best thing to learn from, among what arrived in the last 24 hours. It is also sent to your inbox once a day.',
       settings: 'Digest settings',
       discuss: 'Worth joining',
       learn: 'Worth learning from',
       discussEmpty:
         'Nothing in the last 24 hours matched well enough to join in.',
       learnEmpty: 'Nothing in the last 24 hours stood out to learn from.',
+      hot: 'Heating up',
+      hotEmpty: 'Nothing recommended from the last 24 hours has caught on yet.',
     },
     followUp: {
       hint: 'Paste the link to your Hacker News or Reddit post and NocoFeed will check it for new replies for two weeks.',
@@ -546,7 +553,13 @@ const enUS = {
     implementation: { native: 'Built in', collector: 'Collector' },
     operations: {
       reddit: { community: 'New posts in communities' },
-      hn: { new: 'New stories', ask: 'Ask HN', show: 'Show HN' },
+      hn: {
+        new: 'New stories',
+        top: 'Front page',
+        best: 'Best stories',
+        ask: 'Ask HN',
+        show: 'Show HN',
+      },
       rss: { feed: 'Feed' },
       youtube: {
         channel: 'Channel uploads',
@@ -562,6 +575,8 @@ const enUS = {
       selftext: 'post text',
       counts: 'votes and comment counts',
       newStories: 'new stories',
+      topStories: 'front-page stories',
+      bestStories: 'best recent stories',
       askStories: 'Ask HN stories',
       showStories: 'Show HN stories',
       text: 'text',
@@ -707,7 +722,9 @@ const enUS = {
         simonwX: 'Posts from Simon Willison on LLMs and tools.',
         anthropicX: 'Announcements from Anthropic.',
         openAiX: 'Announcements from OpenAI.',
-        hnNew: 'Every new story submitted to Hacker News.',
+        hnTop: 'The Hacker News front page: what the community already lifted.',
+        hnBest: 'The highest-voted Hacker News stories of the last few days.',
+        hnNew: 'Every new story submitted to Hacker News; most are never read.',
         hnShow: 'Projects people show on Hacker News.',
         hnAsk: 'Questions asked on Hacker News.',
         lobsters: 'Computing-focused link aggregator with tagged stories.',

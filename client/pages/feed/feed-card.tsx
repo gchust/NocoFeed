@@ -3,6 +3,7 @@ import {
   BookmarkIcon,
   CheckCheckIcon,
   ClockIcon,
+  FlameIcon,
   MessageCircleReplyIcon,
 } from 'lucide-react';
 import type { ReactElement } from 'react';
@@ -11,7 +12,7 @@ import { cn } from 'cn';
 
 import { CoverThumbnail } from './content.js';
 import { ItemTime, PlatformBadge, VerdictBadge } from './parts.js';
-import type { FeedListItem } from './types.js';
+import { HOT_HEAT, type FeedListItem } from './types.js';
 import { youTubeThumbnail, youTubeVideoOf } from './youtube.js';
 
 export type Density = 'comfortable' | 'compact';
@@ -110,6 +111,18 @@ function ComfortableCard({
         {item.quality !== null ? (
           <span className='tabular-nums'>
             {t('feed.qualityValue', { quality: Math.round(item.quality) })}
+          </span>
+        ) : null}
+        {item.heat !== null ? (
+          <span
+            className={cn(
+              'inline-flex items-center gap-0.5 tabular-nums',
+              item.heat >= HOT_HEAT && 'text-primary',
+            )}
+            title={t('feed.heatHint')}
+          >
+            {item.heat >= HOT_HEAT ? <FlameIcon className='size-3' /> : null}
+            {t('feed.heatValue', { heat: item.heat })}
           </span>
         ) : null}
         {item.noise !== 'none' ? (

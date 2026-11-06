@@ -113,6 +113,9 @@ export default class FeedProvider extends ServiceProvider<Application> {
         await feed.prefetchWaiting();
         // Exact publication times for items whose list gave none or only "3 weeks ago" (YouTube search).
         await feed.resolvePublishedTimes();
+        // Counts of recent items read again, so "Trending" follows attention as it grows rather than as it was at
+        // collection; an item that turns hot gets the full analysis it skipped.
+        await feed.refreshHeat();
         // Briefs in the person's reading language for what the feed shows, a few per tick.
         await feed.briefPending();
       },

@@ -36,6 +36,7 @@ const listItem: FeedListItem = {
   verdict: 'discuss',
   score: 72,
   quality: null,
+  heat: 72,
   noise: 'none',
   gate: null,
   topicId: 1,
@@ -195,6 +196,8 @@ const api = vi.fn(({ method, path, query, json }: ApiCall) => {
       data: {
         // A search narrows the counts the way it narrows the list.
         all: query?.q ? 4 : 12,
+        hot: 1,
+        solid: 0,
         discuss: 1,
         learn: 0,
         saved: 0,
@@ -202,6 +205,8 @@ const api = vi.fn(({ method, path, query, json }: ApiCall) => {
         participated: 0,
         unread: {
           all: query?.unread ? 12 : 5,
+          hot: 1,
+          solid: 0,
           discuss: 1,
           learn: 0,
           saved: 0,
@@ -214,7 +219,12 @@ const api = vi.fn(({ method, path, query, json }: ApiCall) => {
     };
   if (method === 'GET' && path === 'feedDigest')
     return {
-      data: { since: '2026-10-27T10:00:00Z', discuss: [listItem], learn: [] },
+      data: {
+        since: '2026-10-27T10:00:00Z',
+        hot: [],
+        discuss: [listItem],
+        learn: [],
+      },
     };
   if (method === 'GET' && path === 'feedTopics')
     return {
@@ -484,6 +494,60 @@ describe('feed page', () => {
           method: 'GET',
           path: 'feedItems',
           query: expect.objectContaining({ period: 'week', sort: 'priority' }),
+        }),
+      ),
+    );
+  });
+
+  it('opens Trending by heat and In depth by worth, and shows how hot an item is', async () => {
+    const user = userEvent.setup();
+    await renderAt('/?view=hot');
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ view: 'hot', sort: 'priority' }),
+        }),
+      ),
+    );
+    expect(
+      await screen.findByText(enUS.feed.heatValue.replace('{{heat}}', '72')),
+    ).toHaveAttribute('title', enUS.feed.heatHint);
+
+    const rail = screen.getByRole('navigation', {
+      name: enUS.feed.views.label,
+    });
+    await user.click(
+      within(rail).getByRole('button', {
+        name: new RegExp(enUS.feed.views.solid),
+      }),
+    );
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ view: 'solid', sort: 'priority' }),
+        }),
+      ),
+    );
+
+    // Newest first stays available there, and is kept in the address since it is not the view's own order.
+    await user.click(
+      within(rail).getByRole('combobox', { name: enUS.feed.filters.sort }),
+    );
+    await user.click(
+      await screen.findByRole('option', {
+        name: enUS.feed.filters.sorts.newest,
+      }),
+    );
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          path: 'feedItems',
+          query: expect.objectContaining({ view: 'solid', sort: 'newest' }),
         }),
       ),
     );

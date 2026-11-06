@@ -295,11 +295,20 @@ export const FeedRunStatsSchema = z.object({
 
 export const ListItemsQuery = z.object({
   view: z
-    .enum(['all', 'discuss', 'learn', 'saved', 'later', 'participated'])
+    .enum([
+      'all',
+      'hot',
+      'solid',
+      'discuss',
+      'learn',
+      'saved',
+      'later',
+      'participated',
+    ])
     .default('all')
     .meta({
       description:
-        'all, discuss and learn leave out dismissed items; the personal views keep them',
+        'hot: recommended items getting attention now; solid: recommended items of high worth. all, hot, solid, discuss and learn leave out dismissed items; the personal views keep them',
     }),
   platform: PLATFORM.optional(),
   topicId: z.coerce.number().int().positive().optional(),
@@ -315,7 +324,7 @@ export const ListItemsQuery = z.object({
     .meta({ description: 'true: only items I have not read' }),
   sort: z.enum(['newest', 'priority']).default('newest').meta({
     description:
-      'newest (default): most recently published first; priority: most worth reading first',
+      'newest (default): most recently published first; priority: most worth reading first (by heat in hot, by quality in solid)',
   }),
   pageSize: z.coerce.number().int().min(1).max(100).default(30),
   pageToken: z.string().max(64).optional(),
@@ -379,6 +388,10 @@ export const FeedListItemSchema = z
     verdict: z.enum(['discuss', 'learn', 'ignore']).nullable(),
     score: z.number(),
     quality: z.number().nullable(),
+    heat: z.number().int().nullable().meta({
+      description:
+        'Attention on its own platform, 0-100; null when unknown. Not a measure of worth',
+    }),
     noise: NOISE,
     gate: GATE.nullable(),
     topicId: z.number().int().nullable(),
@@ -586,6 +599,8 @@ export const UpdateStateBody = z.strictObject({
 export const FeedSummarySchema = z
   .object({
     all: z.number().int(),
+    hot: z.number().int(),
+    solid: z.number().int(),
     discuss: z.number().int(),
     learn: z.number().int(),
     saved: z.number().int(),
@@ -594,6 +609,8 @@ export const FeedSummarySchema = z
     unread: z
       .object({
         all: z.number().int(),
+        hot: z.number().int(),
+        solid: z.number().int(),
         discuss: z.number().int(),
         learn: z.number().int(),
         saved: z.number().int(),
@@ -611,6 +628,7 @@ export const FeedSummarySchema = z
 export const FeedDigestSchema = z
   .object({
     since: z.string(),
+    hot: z.array(FeedListItemSchema),
     discuss: z.array(FeedListItemSchema),
     learn: z.array(FeedListItemSchema),
   })

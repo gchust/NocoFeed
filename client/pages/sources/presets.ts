@@ -219,6 +219,9 @@ const GROUPS: Readonly<Record<PresetCategory, readonly Entry[]>> = {
     x('openAiX', 'OpenAI', '@OpenAI'),
   ],
   dev: [
+    // The front page first: `new` is every submission, most of which nobody ever reads.
+    hn('hnTop', 'Hacker News: front page', 'top'),
+    hn('hnBest', 'Hacker News: best stories', 'best'),
     hn('hnNew', 'Hacker News: new stories', 'new'),
     hn('hnShow', 'Show HN', 'show'),
     hn('hnAsk', 'Ask HN', 'ask'),

@@ -61,6 +61,21 @@ export const CATALOG: readonly PlatformSpec[] = [
         enrich: ['comments'],
       },
       {
+        // The front page: what the community already lifted. Fewer, hotter items than `new`.
+        operation: 'top',
+        implementation: 'native',
+        input: 'none',
+        capabilities: ['topStories', 'text', 'counts'],
+        enrich: ['comments'],
+      },
+      {
+        operation: 'best',
+        implementation: 'native',
+        input: 'none',
+        capabilities: ['bestStories', 'text', 'counts'],
+        enrich: ['comments'],
+      },
+      {
         operation: 'ask',
         implementation: 'native',
         input: 'none',

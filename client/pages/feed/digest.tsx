@@ -1,6 +1,7 @@
 import { useApiClient } from '@nocobase/app-client';
 import { useTranslation } from '@nocobase/i18n/client';
 import {
+  FlameIcon,
   GraduationCapIcon,
   MessagesSquareIcon,
   SunriseIcon,
@@ -104,6 +105,13 @@ export function DigestPanel({
           </p>
         </div>
       </div>
+      <DigestGroup
+        icon={<FlameIcon className='size-4' />}
+        title={t('feed.digest.hot')}
+        empty={t('feed.digest.hotEmpty')}
+      >
+        {digest.hot.map(card)}
+      </DigestGroup>
       <DigestGroup
         icon={<MessagesSquareIcon className='size-4' />}
         title={t('feed.digest.discuss')}

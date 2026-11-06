@@ -51,6 +51,8 @@ export interface AnalysisItem {
   transcript: TranscriptSegment[] | null;
   /** Shown to the person, never looked at; the prompt only says how many there are. */
   media?: readonly MediaEntry[] | null;
+  /** The platform's counts as last read (points, comments, views…); absent when unknown. */
+  metrics?: Readonly<Record<string, number>> | null;
   coverage: ItemCoverage;
 }
 
@@ -92,7 +94,7 @@ export function mediaLine(media: readonly MediaEntry[] | null | undefined) {
 }
 
 export const RULES_VERSION = 'rules-4';
-export const PROMPT_VERSION = 'prompt-6';
+export const PROMPT_VERSION = 'prompt-7';
 export const PREFILTER_VERSION = 'prefilter-1';
 
 export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
@@ -804,6 +806,17 @@ export function limitedToTitle(
   };
 }
 
+function engagementLine(
+  metrics: Readonly<Record<string, number>> | null | undefined,
+): string {
+  const entries = Object.entries(metrics ?? {}).filter(
+    ([, value]) => typeof value === 'number' && Number.isFinite(value),
+  );
+  return entries.length
+    ? entries.map(([key, value]) => `${key}: ${value}`).join(', ')
+    : '(unknown)';
+}
+
 /** The prompt for the model analysis. External text is wrapped as material; it never carries instructions. */
 export function buildPrompt(
   item: AnalysisItem,
@@ -822,6 +835,7 @@ export function buildPrompt(
     'Judge quality from the MATERIAL alone. A famous name, long text, jargon or many numbers earn nothing by themselves; a short post with a clear new fact can rate high.',
     'The burden of proof is on the material. Rate each quality axis only for what the MATERIAL itself shows; never credit what it might contain, what the link might lead to or what a product might do. When you cannot tell whether something is useful, it is not: give "usefulness" and "evidence" 3 or less.',
     'Noise: "promo" when the main purpose is to sell, recruit or sign people up, such as adverts, paid courses and giveaways, and also when it mainly introduces the author\'s own product, tool or service and asks people to try it, free or not ("Show HN", launches, "I built X"), without a method, results or lessons the reader could use without adopting it; a talk or case study explaining how something was built is not promo even if it names a vendor; "routine" for minor versions, ordinary fixes and platform listings; "roundup" for digests of many events with no focus; "hype" for "faster, stronger, amazing" without data, method or wider availability; "teaser" for announcements with nothing yet to verify; otherwise "none". Thin material is not noise: say so in "uncertainty" and rate the axes low.',
+    'ENGAGEMENT is how much attention the item has on its platform. It is never evidence of worth: do not raise any quality axis for it. A lively thread on a relevant subject can make joining in worthwhile.',
     'Keep "verdict", "interestLevel", "experienceLevel" and the "quality" labels exactly as listed in English; only free text follows the language above.',
     `Answer with one JSON object only, no markdown, written in ${language}.`,
   ].join('\n');
@@ -863,6 +877,9 @@ ${topics.map((topic) => `- id ${topic.id}: ${topic.name} — ${topic.goal}${topi
 
 MATERIAL COVERAGE
 ${coverageLines}
+
+ENGAGEMENT
+${engagementLine(item.metrics)}
 
 MATERIAL (platform: ${item.platform})
 <<<
