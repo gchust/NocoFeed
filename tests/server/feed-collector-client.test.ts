@@ -442,6 +442,57 @@ describe('Collector publication times', () => {
     expect(result.body).toBeUndefined();
   });
 
+  it('passes on a day-only time as approximate (issue #17)', async () => {
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        item: {
+          publishedAt: '2026-10-09T12:00:00.000Z',
+          publishedAtApproximate: true,
+          coverage: {},
+        },
+      },
+    });
+    expect(await lookup()).toMatchObject({
+      status: 'ok',
+      publishedAt: '2026-10-09T12:00:00.000Z',
+      publishedAtApproximate: true,
+    });
+  });
+
+  it('asks the Collector for the description of a YouTube search result (issue #17)', async () => {
+    answer = () => ({
+      status: 200,
+      body: {
+        status: 'ok',
+        item: {
+          body: 'What the video is about.',
+          coverage: { body: { status: 'available' } },
+        },
+      },
+    });
+    const result = await createAdapters(config).enrich({
+      platform: 'youtube',
+      externalId: 'PPl884-BKWY',
+      url: 'https://www.youtube.com/watch?v=PPl884-BKWY',
+      want: ['body'],
+      signal: new AbortController().signal,
+    });
+    expect(received.map((entry) => entry.body)).toEqual([
+      {
+        platform: 'youtube',
+        externalId: 'PPl884-BKWY',
+        url: 'https://www.youtube.com/watch?v=PPl884-BKWY',
+        want: ['body'],
+      },
+    ]);
+    expect(result).toMatchObject({
+      status: 'ok',
+      body: 'What the video is about.',
+    });
+  });
+
   it('does not ask for it on other platforms', async () => {
     const result = await lookup(createAdapters(config), 'x');
     expect(result.status).toBe('unsupported');

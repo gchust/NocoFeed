@@ -45,7 +45,12 @@ import {
   type XiaohongshuIdea,
 } from './ideas-model.js';
 
-const ERROR_CODES = new Set(['noModel', 'ideasFailed', 'timeout']);
+const ERROR_CODES = new Set([
+  'noModel',
+  'ideasFailed',
+  'timeout',
+  'thinMaterial',
+]);
 
 function Field({
   label,
@@ -241,7 +246,14 @@ function IdeaSetCard({
       </CardHeader>
       <CardContent className='flex flex-col gap-3'>
         {set.status === 'failed' || set.error ? (
-          <p className='text-sm text-destructive'>
+          <p
+            className={
+              // Not enough content is no failure: nothing went wrong, there is just nothing to work from yet.
+              set.error === 'thinMaterial'
+                ? 'text-sm text-muted-foreground'
+                : 'text-sm text-destructive'
+            }
+          >
             {t(
               `feed.ideas.errors.${set.error && ERROR_CODES.has(set.error) ? set.error : 'ideasFailed'}`,
             )}

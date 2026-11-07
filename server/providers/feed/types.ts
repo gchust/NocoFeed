@@ -152,8 +152,13 @@ export interface EnrichResult {
   transcript?: TranscriptSegment[];
   /** Read along with the body; absent when nothing was read, which keeps what is stored. */
   media?: MediaEntry[];
-  /** The exact publication time, when `published` was asked for and the page gave one. */
+  /** The publication time, when `published` was asked for and the page gave one. */
   publishedAt?: string;
+  /**
+   * The page gave only the day (YouTube asking its viewer to sign in): `publishedAt` is noon UTC of that day, better
+   * than "3 weeks ago" but not the exact time.
+   */
+  publishedAtApproximate?: boolean;
   coverage: Partial<ItemCoverage>;
 }
 

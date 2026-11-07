@@ -587,6 +587,8 @@ const enUS = {
         ideasFailed:
           'The model did not come up with usable ideas this time. Try again.',
         timeout: 'Generating took too long and stopped. Try again.',
+        thinMaterial:
+          'Not enough content yet: only the title could be read, so no ideas were generated. Fetch the text or comments first, then try again.',
       },
       unavailable: {
         title: 'No AI model yet',

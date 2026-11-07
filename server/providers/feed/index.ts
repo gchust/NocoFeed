@@ -19,6 +19,7 @@ import { ASK_THREAD, ASK_TRIGGER, createFeedAsk, type FeedAsk } from './ask.js';
 import { createFeedIdeas, type FeedIdeas } from './ideas.js';
 import { createIngest, type FeedIngest } from './ingest.js';
 import { createMailCollector, withMail, type MailCollector } from './mail.js';
+import type { PrepareMaterial } from './material.js';
 import { readPageText } from './page.js';
 import { createFeedReplies, type FeedReplies } from './replies.js';
 import { createRescoreJob } from './rescore-job.js';
@@ -126,6 +127,17 @@ export default class FeedProvider extends ServiceProvider<Application> {
           logger()[level]({ ...context }, message),
       });
     });
+    // Ideas and reply drafts fetch what an item lacks first, the way "Ask about this item" does (issue #17); only what
+    // was read goes into their prompts.
+    const prepareMaterial: PrepareMaterial = async (ownerId, item) => {
+      const prepared = await this.app.container
+        .resolve(feedAskToken)
+        .prepare(ownerId, item);
+      return {
+        item: prepared.item,
+        pageText: prepared.report.page?.text ?? null,
+      };
+    };
     this.app.container.singleton(feedRepliesToken, () => {
       const feed = () => this.app.container.resolve(feedServiceToken);
       return createFeedReplies({
@@ -136,6 +148,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
             : undefined,
         getItem: (ownerId, id) => feed().getItem(ownerId, id),
         getProfile: (ownerId) => feed().getProfile(ownerId),
+        prepare: prepareMaterial,
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });
@@ -150,6 +163,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
             : undefined,
         getItem: (ownerId, id) => feed().getItem(ownerId, id),
         getProfile: (ownerId) => feed().getProfile(ownerId),
+        prepare: prepareMaterial,
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });

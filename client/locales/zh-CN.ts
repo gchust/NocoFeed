@@ -550,6 +550,8 @@ const zhCN: AppResource = {
         noModel: '还没有配置 AI 模型，无法生成点子。',
         ideasFailed: '这次模型没有给出可用的点子，请再试一次。',
         timeout: '生成时间过长已停止，请再试一次。',
+        thinMaterial:
+          '内容不足，暂不生成：目前只拿到了标题。先抓取正文或评论，再试一次。',
       },
       unavailable: {
         title: '还没有 AI 模型',

@@ -233,6 +233,22 @@ describe('ideas on an item', () => {
     expect(screen.getByText(new RegExp(ideas.stale))).toBeVisible();
   });
 
+  it('says there is not enough content yet instead of ideas from a bare title (issue #17)', async () => {
+    ideasState = {
+      ...empty,
+      sets: [
+        set({
+          kind: 'xiaohongshu',
+          status: 'failed',
+          error: 'thinMaterial',
+          generatedAt: null,
+        }),
+      ],
+    };
+    await render(<IdeasSection itemId={7} />);
+    expect(await screen.findByText(ideas.errors.thinMaterial)).toBeVisible();
+  });
+
   it('deletes after confirming', async () => {
     ideasState = ready;
     const user = userEvent.setup();

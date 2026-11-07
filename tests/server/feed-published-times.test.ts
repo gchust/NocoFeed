@@ -325,3 +325,43 @@ test('a lookup that finds nothing waits a day; one the Collector could not make 
   ).toBe(0);
   expect(mine()).toBe(5);
 });
+
+test('a page that gives only the day sets an approximate time where it says more than the stored one', async ({
+  testApp,
+}) => {
+  const noonOf = (ms: number) => {
+    const date = new Date(ms);
+    date.setUTCHours(12, 0, 0, 0);
+    return date.toISOString();
+  };
+  // YouTube asked the Collector to sign in: the page said only "Oct 9, 2026", sent as noon UTC, approximate.
+  let day = noonOf(Date.now() - 2 * DAY);
+  const { service, ownerId, source, stored, id, approximate, time } =
+    await setUp(testApp, () => ({
+      status: 'ok',
+      publishedAt: day,
+      publishedAtApproximate: true,
+      coverage: {},
+    }));
+  await service.runSource(ownerId, source.id, 'manual');
+
+  // No exact time was found, so none is counted.
+  expect(await service.resolvePublishedTimes()).toBe(0);
+  const [undated] = await stored(id('undated'));
+  expect(time(undated!.publishedAt)).toBe(day);
+  expect(Boolean(undated!.publishedApproximate)).toBe(true);
+  expect(time(undated!.timelineAt)).toBe(day);
+  // "2 days ago" and that day agree: the relative time stays, it is closer.
+  const [approx] = await stored(id('approx'));
+  expect(time(approx!.publishedAt)).toBe(approximate);
+  expect(approx!.publishedCheckedAt).not.toBeNull();
+
+  // A day later the page says an earlier day: that replaces the relative time, still approximate.
+  day = noonOf(Date.now() - 10 * DAY);
+  await service.resolvePublishedTimes({
+    now: new Date(Date.now() + DAY + HOUR),
+  });
+  const [moved] = await stored(id('approx'));
+  expect(time(moved!.publishedAt)).toBe(day);
+  expect(Boolean(moved!.publishedApproximate)).toBe(true);
+});

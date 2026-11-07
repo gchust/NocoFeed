@@ -553,6 +553,8 @@ const BRIEF_WINDOW_MS = 3 * 24 * 60 * 60_000;
 const PUBLISHED_BUDGET_MS = 60_000;
 const PUBLISHED_WINDOW_MS = 30 * 24 * 60 * 60_000;
 const PUBLISHED_RECHECK_MS = 24 * 60 * 60_000;
+/** A day-only publication time (noon UTC) replaces an approximate one only when they are further apart than this. */
+const DAY_TIME_SLACK_MS = 36 * 60 * 60_000;
 const EXCERPT_LENGTH = 280;
 /** Rows changed per statement by "Mark all as read", well under every database's bound-parameter limit. */
 const READ_BATCH = 200;
@@ -2758,7 +2760,9 @@ export function createFeedService(deps: FeedServiceDeps) {
    * Replaces a missing or approximate publication time with the exact one the Collector reads from the item's page, and
    * moves the item to that time in the feed. Every owner's copy of a video is updated by one lookup. A lookup that
    * found nothing is not repeated for a day; one the Collector could not make (sign-in, rate limit, no Collector) is
-   * tried again on the next tick. Returns how many videos got an exact time.
+   * tried again on the next tick. When the page gives only the day (YouTube asking its viewer to sign in), the time
+   * stays approximate, set to that day unless the stored one already agrees, and is looked up again a day later.
+   * Returns how many videos got an exact time.
    */
   async function resolvePublishedTimes({
     limit = PUBLISHED_PER_TICK,
@@ -2768,7 +2772,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     const rows = await database
       .query()
       .selectFrom('feedItems')
-      .select(['id', 'platform', 'externalId', 'url'])
+      .select(['id', 'platform', 'externalId', 'url', 'publishedAt'])
       .where('platform', 'in', PUBLISHED_PLATFORMS)
       .where((eb) =>
         eb.or([
@@ -2822,8 +2826,22 @@ export function createFeedService(deps: FeedServiceDeps) {
       const ok = result.status === 'ok' || result.status === 'partial';
       const published =
         ok && result.publishedAt ? new Date(result.publishedAt) : null;
-      const exact =
+      const usable =
         published && Number.isFinite(published.getTime()) ? published : null;
+      const exact = usable && !result.publishedAtApproximate ? usable : null;
+      // Only the day (the page asked its viewer to sign in): better than "3 weeks ago", but a relative time from the
+      // last day or so ("5 hours ago") is closer, so it is kept when the two agree.
+      const stored = row.publishedAt
+        ? new Date(row.publishedAt as string | Date)
+        : null;
+      const day =
+        usable &&
+        !exact &&
+        (!stored ||
+          !Number.isFinite(stored.getTime()) ||
+          Math.abs(stored.getTime() - usable.getTime()) > DAY_TIME_SLACK_MS)
+          ? usable
+          : null;
       await database
         .query()
         .updateTable('feedItems')
@@ -2835,7 +2853,14 @@ export function createFeedService(deps: FeedServiceDeps) {
                 timelineAt: exact,
                 publishedCheckedAt: now,
               }
-            : { publishedCheckedAt: now },
+            : day
+              ? {
+                  publishedAt: day,
+                  publishedApproximate: true,
+                  timelineAt: day,
+                  publishedCheckedAt: now,
+                }
+              : { publishedCheckedAt: now },
         )
         .where('platform', '=', platform)
         .where('externalId', '=', externalId)

@@ -36,6 +36,7 @@ import {
   type FeedIdeas,
   type FeedService,
 } from '../../server/providers/feed/index.js';
+import type { FeedIdeasDeps } from '../../server/providers/feed/ideas.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 const ORIGIN = 'http://localhost';
@@ -148,6 +149,81 @@ describe('ideas prompt and answer', () => {
     expect(searching.system).toContain('Search the web');
     expect(searching.prompt).toContain('old meme');
     expect(searching.prompt).toContain('"meme": 1 memes');
+  });
+
+  it('puts only what was read in the prompt, and forbids talking about what was not (issue #17)', () => {
+    const bare = buildIdeasPrompt({
+      item: {
+        ...item,
+        url: null,
+        author: null,
+        body: null,
+        summary: 'https://example.com/post',
+        brief: null,
+        analysis: null,
+      },
+      kinds: ['xiaohongshu'],
+      style: DEFAULT_IDEA_STYLE,
+      language: 'zh-CN',
+      xLanguage: 'en',
+      related: [],
+      webSearch: false,
+    });
+    for (const text of [
+      'not obtained',
+      '(none)',
+      'unknown',
+      'Body:',
+      'Summary:',
+      'Comments:',
+      'Subtitles:',
+      'Link:',
+      'MATERIAL STATUS',
+    ])
+      expect(bare.prompt).not.toContain(text);
+    expect(bare.system).toContain(
+      'Never mention how the material was obtained',
+    );
+    expect(bare.system).toContain('having only a title');
+
+    const full = buildIdeasPrompt({
+      item: {
+        ...item,
+        body: null,
+        comments: [{ author: 'dba', text: 'We do the same with pgBackRest.' }],
+        transcript: [{ start: 0, text: 'Today we restore a database.' }],
+      },
+      pageText: 'The linked page explains WAL archiving.',
+      kinds: ['x'],
+      style: DEFAULT_IDEA_STYLE,
+      language: 'en',
+      xLanguage: 'en',
+      related: [],
+      webSearch: false,
+    });
+    expect(full.prompt).toContain(
+      'Body: The linked page explains WAL archiving.',
+    );
+    expect(full.prompt).toContain('- dba: We do the same with pgBackRest.');
+    expect(full.prompt).toContain('Subtitles: Today we restore a database.');
+
+    // A brief written from a bare title talks about what is missing: it stays out.
+    const commentsOnly = buildIdeasPrompt({
+      item: {
+        ...item,
+        body: null,
+        brief: { brief: '帖子只抓到了标题。' },
+        comments: [{ author: 'dba', text: 'Same here.' }],
+      },
+      kinds: ['x'],
+      style: DEFAULT_IDEA_STYLE,
+      language: 'en',
+      xLanguage: 'en',
+      related: [],
+      webSearch: false,
+    });
+    expect(commentsOnly.prompt).not.toContain('只抓到了标题');
+    expect(commentsOnly.prompt).toContain('- dba: Same here.');
   });
 
   it('keeps every kind in its structure, and X posts within 280 characters', () => {
@@ -324,7 +400,11 @@ async function createItem(
       title,
       body: 'We cut restore time from 3 hours to 4 minutes with incremental snapshots.',
       url: 'https://news.ycombinator.com/item?id=1',
-      coverage: { body: { status: 'available' } },
+      // Comments counted as read, so generating does not go out to fetch them first.
+      coverage: {
+        body: { status: 'available' },
+        comments: { status: 'available' },
+      },
       contentVersion: 1,
       fetchedAt: now,
       timelineAt: now,
@@ -709,7 +789,13 @@ describe('which way to the model', () => {
     };
   }
 
-  function setUpFake(online: { webSearch: boolean; fails?: boolean }) {
+  function setUpFake(
+    online: { webSearch: boolean; fails?: boolean },
+    options: {
+      detail?: Record<string, unknown>;
+      prepare?: FeedIdeasDeps['prepare'];
+    } = {},
+  ) {
     const { rows, database } = fakeDatabase();
     const generate = vi.fn(async () => ({ text: JSON.stringify(answer()) }));
     const run = vi.fn(async () => {
@@ -739,8 +825,9 @@ describe('which way to the model', () => {
           onlineAgent: { background },
           conversations: { delete: remove },
         }) as never,
-      getItem: async () => detail as never,
+      getItem: async () => (options.detail ?? detail) as never,
       getProfile: async () => profile as never,
+      prepare: options.prepare,
       log: () => undefined,
     });
     const actor = {
@@ -793,5 +880,68 @@ describe('which way to the model', () => {
       { system: string },
     ];
     expect(request.system).toContain('cannot search the web');
+  });
+
+  it('fetches what the item lacks before writing, and writes from it (issue #17)', async () => {
+    const titleOnly = {
+      ...detail,
+      platform: 'xiaohongshu',
+      body: null,
+      summary: null,
+      brief: null,
+      analysis: null,
+      comments: [],
+      transcript: [],
+    };
+    const prepare = vi.fn(async (_owner: string, current: unknown) => ({
+      item: {
+        ...(current as typeof titleOnly),
+        body: '搜索排名只是入场券，点击靠标题和描述。',
+        comments: [{ author: '读者', text: '标题决定了一半的点击率' }],
+      } as never,
+    }));
+    const fake = setUpFake(
+      { webSearch: false },
+      { detail: titleOnly, prepare },
+    );
+    await fake.ideas.request(fake.actor, 'u1', 1, ['xiaohongshu']);
+    await fake.ideas.settled();
+    expect(prepare).toHaveBeenCalledWith(
+      'u1',
+      expect.objectContaining({ id: 1 }),
+    );
+    const [request] = fake.generate.mock.calls[0] as unknown as [
+      { prompt: string },
+    ];
+    expect(request.prompt).toContain('Body: 搜索排名只是入场券');
+    expect(request.prompt).toContain('- 读者: 标题决定了一半的点击率');
+    expect(request.prompt).not.toContain('not obtained');
+    expect(fake.rows.get('1:xiaohongshu')).toMatchObject({ status: 'ready' });
+  });
+
+  it('does not generate from a bare title, even when fetching fails', async () => {
+    const titleOnly = {
+      ...detail,
+      platform: 'xiaohongshu',
+      body: null,
+      summary: null,
+      comments: [],
+      transcript: [],
+    };
+    const prepare = vi.fn(async () => {
+      throw new Error('collector down');
+    });
+    const fake = setUpFake(
+      { webSearch: false },
+      { detail: titleOnly, prepare },
+    );
+    await fake.ideas.request(fake.actor, 'u1', 1, ['xiaohongshu']);
+    await fake.ideas.settled();
+    expect(prepare).toHaveBeenCalled();
+    expect(fake.generate).not.toHaveBeenCalled();
+    expect(fake.rows.get('1:xiaohongshu')).toMatchObject({
+      status: 'failed',
+      error: 'thinMaterial',
+    });
   });
 });

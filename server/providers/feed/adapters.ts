@@ -214,6 +214,12 @@ export function createAdapters(config: () => FeedConfig): Adapters {
         } else if (wantsText && request.platform === 'reddit') {
           results.push(await enrichReddit(http, request));
         } else if (
+          request.platform === 'youtube' &&
+          request.want.includes('body')
+        ) {
+          // A search result has only its title; the Collector reads the description from the video page.
+          results.push(await collector.enrich({ ...request, want: ['body'] }));
+        } else if (
           wantsText &&
           ['xiaohongshu', 'x'].includes(request.platform)
         ) {
@@ -249,6 +255,9 @@ export function createAdapters(config: () => FeedConfig): Adapters {
             transcript: next.transcript ?? merged.transcript,
             media: next.media ?? merged.media,
             publishedAt: next.publishedAt ?? merged.publishedAt,
+            publishedAtApproximate: next.publishedAt
+              ? next.publishedAtApproximate
+              : merged.publishedAtApproximate,
             coverage: { ...merged.coverage, ...next.coverage },
           }),
           { status: 'ok', coverage: {} },
@@ -1280,6 +1289,11 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
         ...(response.item ?? { coverage: {} }),
         media: cleanMedia(response.item?.media),
         publishedAt: collectorInstant(response.item?.publishedAt),
+        publishedAtApproximate:
+          collectorInstant(response.item?.publishedAt) &&
+          response.item?.publishedAtApproximate === true
+            ? true
+            : undefined,
         coverage: response.item?.coverage ?? {},
       };
     },
@@ -1298,6 +1312,7 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
           status: result.status,
           message: result.message,
           publishedAt: result.publishedAt,
+          publishedAtApproximate: result.publishedAtApproximate,
           coverage: {},
         };
       } catch (error) {

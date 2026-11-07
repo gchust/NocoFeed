@@ -135,7 +135,8 @@ export const CATALOG: readonly PlatformSpec[] = [
         implementation: 'collector',
         input: 'text',
         capabilities: ['searchCandidates', 'transcriptOnDemand'],
-        enrich: ['transcript'],
+        // The description from the video page (the search page has only the title).
+        enrich: ['body', 'transcript'],
       },
       {
         operation: 'video',
