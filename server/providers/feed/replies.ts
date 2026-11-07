@@ -20,6 +20,12 @@ import {
   storedSteer,
 } from './steer.js';
 import { truncate } from './text.js';
+import {
+  NO_SKILLS,
+  skillsBlock,
+  type SkillsForPrompt,
+  skillsVersion,
+} from './skills-prompt.js';
 
 /**
  * Reply drafts (issue #15): replies the person can copy to join a discussion worth joining. Apart from the analysis,
@@ -168,9 +174,13 @@ export function effectiveGuidelines(
   return extra ? `${general}\n\nOn ${platform}: ${extra}` : general;
 }
 
-/** A short, stable name for a set of rules, kept with the drafts written under them. */
-export function guidelinesVersion(text: string): string {
-  return createHash('sha256').update(text).digest('hex').slice(0, 12);
+/**
+ * A short, stable name for a set of rules, kept with the drafts written under them. With writing skills, their
+ * `name@version` marker is part of it, so changing a skill shows as changed rules; without skills it is as before.
+ */
+export function guidelinesVersion(text: string, skillMarker = ''): string {
+  const version = createHash('sha256').update(text).digest('hex').slice(0, 12);
+  return skillMarker ? `${version}-${skillsVersion(skillMarker)}` : version;
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -215,6 +225,16 @@ export function postLanguage(
   return null;
 }
 
+/** The language the drafts are written in: the post's, read from the linked page when the item is only a link. */
+export function replyLanguageOf(
+  item: Pick<FeedItemDetail, 'title' | 'summary' | 'body' | 'platform'>,
+  pageText?: string | null,
+): string | null {
+  return postLanguage(
+    pageText && !item.body?.trim() ? { ...item, body: pageText } : item,
+  );
+}
+
 /** The prompt for reply drafts: in the post's language, in the platform's style, under the person's rules. */
 export function buildReplyPrompt(
   item: FeedItemDetail,
@@ -224,10 +244,10 @@ export function buildReplyPrompt(
   pageText?: string | null,
   /** What the person asked for this round (issue #20); comes after the defaults and wins over them. */
   steer?: Steer | null,
+  /** The writing skills the person chose for replies in the post's language. */
+  skills: SkillsForPrompt = NO_SKILLS,
 ): { system: string; prompt: string } {
-  const detected = postLanguage(
-    pageText && !item.body?.trim() ? { ...item, body: pageText } : item,
-  );
+  const detected = replyLanguageOf(item, pageText);
   const replyLanguage = detected
     ? LANGUAGE_NAMES[detected]
     : 'the language the MATERIAL is written in';
@@ -250,7 +270,13 @@ export function buildReplyPrompt(
         ]
       : []),
     `Beside each reply, in ${notes}: "tone", a 2-6 word label for its angle; "image", one picture, screenshot or meme idea to post with it, described in words, or "" when none fits. "emoji": a few emoji that fit the reply, or "" when emoji do not suit the platform.`,
+    ...(skills.skills.length
+      ? [
+          'The WRITING SKILLS below apply to the reply text only, never to the notes beside it.',
+        ]
+      : []),
     'Answer with one JSON object only, no markdown fence.',
+    ...(skills.skills.length ? ['', skillsBlock(skills)] : []),
   ].join('\n');
   const prompt = `GUIDELINES (written by the person; trusted)
 <<<
@@ -323,6 +349,14 @@ export interface FeedRepliesDeps {
    * (`ask.ts` `prepare`). Without it the drafts are written from what is stored.
    */
   prepare?: PrepareMaterial;
+  /**
+   * The writing skills a person chose for replies in the given languages (`writing-skills.ts`). Without it, or when
+   * none is chosen, drafts are written as before.
+   */
+  skills?: (
+    ownerId: string,
+    languages: readonly (string | null)[],
+  ) => Promise<SkillsForPrompt>;
   log: (
     level: 'info' | 'warn' | 'error',
     message: string,
@@ -441,6 +475,18 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
     );
   }
 
+  async function skillsOf(
+    ownerId: string,
+    language: string | null,
+  ): Promise<SkillsForPrompt> {
+    if (!deps.skills) return NO_SKILLS;
+    try {
+      return await deps.skills(ownerId, [language]);
+    } catch {
+      return NO_SKILLS;
+    }
+  }
+
   async function saveRow(
     ownerId: string,
     itemId: number,
@@ -479,13 +525,17 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-    const rules = await currentRules(ownerId, item, profile);
+    const [rules, skills] = await Promise.all([
+      currentRules(ownerId, item, profile),
+      skillsOf(ownerId, replyLanguageOf(item, pageText)),
+    ]);
     const { system, prompt } = buildReplyPrompt(
       item,
       profile,
       rules,
       pageText,
       steer,
+      skills,
     );
     const ask = async () =>
       (
@@ -511,7 +561,7 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
         trigger,
         drafts: answer.drafts,
         language: answer.language ?? postLanguage(item),
-        guidelinesVersion: guidelinesVersion(rules),
+        guidelinesVersion: guidelinesVersion(rules, skills.marker),
         contentVersion: item.contentVersion,
         model: `${ref.modelService}/${ref.model}`,
         steer,
@@ -550,7 +600,12 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
       modelRef(),
       currentRules(ownerId, item, profile),
     ]);
-    const current = guidelinesVersion(rules);
+    // The skill for the language the drafts are in (else the post's): the one they were, or would be, written with.
+    const skills = await skillsOf(
+      ownerId,
+      (row?.language as string | null | undefined) ?? postLanguage(item),
+    );
+    const current = guidelinesVersion(rules, skills.marker);
     const drafts = jsonOf<ReplyDraft[]>(row?.drafts, []);
     const requestedAt = row?.requestedAt
       ? new Date(row.requestedAt as string).getTime()

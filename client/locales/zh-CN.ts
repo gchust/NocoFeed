@@ -36,12 +36,17 @@ const zhCN: AppResource = {
     agents: '智能体',
     runtimes: '运行环境',
     agentUsage: '智能体用量',
+    skills: 'Skills',
     mailAccounts: '邮件账号',
   },
   agents: {
     subjects: { feedItem: '信息条目' },
     triggers: { analyze: '重新分析', ask: '追问条目' },
-    pages: { runtimeConnect: '添加运行环境' },
+    pages: {
+      runtimeConnect: '添加运行环境',
+      skillNew: '新建 Skill',
+      skillDetail: 'Skill 详情',
+    },
   },
   app: { ...systemZhCN.app, title: 'NocoFeed' },
   feed: {
@@ -1170,6 +1175,28 @@ const zhCN: AppResource = {
       save: '保存准则',
       saved: '回复准则已保存',
       savedHint: '之后生成的回复草稿会使用新准则。',
+    },
+    // 写作 Skill（`writing-skills.tsx`）：技能库里的 Skill 用于回复草稿、点子和摘要，按文字的语言选择。
+    writingSkills: {
+      title: '写作 Skill',
+      description:
+        '按文字的语言选择 Skill，让 AI 生成的回复、点子和摘要遵循它的写法，例如英文用 humanizer、中文用 Humanizer-zh。Skill 只影响措辞，不会改变事实，也不会放宽"不误导、不失礼"的底线。',
+      uses: { replies: '回复草稿', ideas: '点子', briefs: '摘要' },
+      usesHint: {
+        replies:
+          '按原帖的语言选用。改了 Skill 或 Skill 有新版本后，已有草稿会提示"准则已变"。',
+        ideas: '小红书和 B 站按中文，X 按所选的发帖语言，其他按阅读语言。',
+        briefs:
+          '按阅读语言选用（阅读语言为原文时按条目的语言）。只影响之后生成的摘要。',
+      },
+      languages: { en: '英文', zh: '中文', other: '其他语言' },
+      none: '不使用',
+      empty:
+        '技能库里还没有 Skill。管理员可以在 系统设置 → Skills 中新建或导入（例如 humanizer、Humanizer-zh 的 SKILL.md）。',
+      library: 'Skill 在 系统设置 → Skills 中维护。',
+      save: '保存',
+      saved: '写作 Skill 已保存',
+      savedHint: '之后生成的内容会使用所选的 Skill。',
     },
     agent: {
       none: '不使用：由 AI 模型和规则分析',

@@ -24,6 +24,11 @@ import { readPageText } from './page.js';
 import { createFeedReplies, type FeedReplies } from './replies.js';
 import { createRescoreJob } from './rescore-job.js';
 import { createFeedService, type FeedService } from './service.js';
+import {
+  createWritingSkills,
+  type SkillUse,
+  type WritingSkills,
+} from './writing-skills.js';
 
 export type { FeedService } from './service.js';
 export type { FeedAsk } from './ask.js';
@@ -31,6 +36,7 @@ export type { FeedIdeas } from './ideas.js';
 export type { FeedIngest } from './ingest.js';
 export type { MailCollector } from './mail.js';
 export type { FeedReplies } from './replies.js';
+export type { WritingSkills } from './writing-skills.js';
 export { FeedError } from './service.js';
 
 export const feedServiceToken: ServiceToken<FeedService> =
@@ -55,6 +61,10 @@ export const feedMailToken: ServiceToken<MailCollector> =
 /** Reply drafts to copy when joining a discussion (`replies.ts`, issue #15). */
 export const feedRepliesToken: ServiceToken<FeedReplies> =
   createServiceToken<FeedReplies>('nocofeed/feed-replies');
+
+/** Which writing skill each person uses where, and the chosen skills as prompt text (`writing-skills.ts`). */
+export const feedWritingSkillsToken: ServiceToken<WritingSkills> =
+  createServiceToken<WritingSkills>('nocofeed/feed-writing-skills');
 
 const feedAdaptersToken: ServiceToken<Adapters> = createServiceToken<Adapters>(
   'nocofeed/feed-adapters',
@@ -127,6 +137,26 @@ export default class FeedProvider extends ServiceProvider<Application> {
           logger()[level]({ ...context }, message),
       });
     });
+    this.app.container.singleton(feedWritingSkillsToken, () =>
+      createWritingSkills({
+        database: this.app.container.resolve(databaseManagerToken),
+        agents: () =>
+          this.app.container.has(agentsToken)
+            ? this.app.container.resolve(agentsToken)
+            : undefined,
+        getProfile: (ownerId) =>
+          this.app.container.resolve(feedServiceToken).getProfile(ownerId),
+        log: (level, message, context) =>
+          logger()[level]({ ...context }, message),
+      }),
+    );
+    // Reply drafts, ideas and briefs are written with the skills the person chose for them.
+    const skillsFor =
+      (use: SkillUse) =>
+      (ownerId: string, languages: readonly (string | null)[]) =>
+        this.app.container
+          .resolve(feedWritingSkillsToken)
+          .forPrompt(ownerId, use, languages);
     // Ideas and reply drafts fetch what an item lacks first, the way "Ask about this item" does (issue #17); only what
     // was read goes into their prompts.
     const prepareMaterial: PrepareMaterial = async (ownerId, item) => {
@@ -149,6 +179,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
         getItem: (ownerId, id) => feed().getItem(ownerId, id),
         getProfile: (ownerId) => feed().getProfile(ownerId),
         prepare: prepareMaterial,
+        skills: skillsFor('replies'),
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });
@@ -164,6 +195,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
         getItem: (ownerId, id) => feed().getItem(ownerId, id),
         getProfile: (ownerId) => feed().getProfile(ownerId),
         prepare: prepareMaterial,
+        skills: skillsFor('ideas'),
         log: (level, message, context) =>
           logger()[level]({ ...context }, message),
       });
@@ -202,6 +234,7 @@ export default class FeedProvider extends ServiceProvider<Application> {
           return result.status !== 'failed';
         },
         log: (level, message, context) => log[level]({ ...context }, message),
+        skills: skillsFor('briefs'),
         deferRescore: async (task) => {
           // Before start() has set the executor up, the service runs the re-score detached itself.
           if (!this.jobs) throw new Error('The job executor is not set up.');

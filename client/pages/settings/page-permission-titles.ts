@@ -7,4 +7,7 @@ import type { PagePermissionTitles } from './page-permissions.js';
 export const pagePermissionTitles: PagePermissionTitles = {
   // The Agents plugin's "Add runtime" dialog under Runtimes (`client/routes.ts`).
   'runtimes-connect': 'agents.pages.runtimeConnect',
+  // The Agents plugin's "New skill" and skill detail pages under Skills (`client/routes.ts`).
+  'skills-new': 'agents.pages.skillNew',
+  'skills-detail': 'agents.pages.skillDetail',
 };

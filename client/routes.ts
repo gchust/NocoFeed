@@ -2,6 +2,7 @@ import {
   agentsRoute,
   modelsRoute,
   runtimesRoute,
+  skillsRoute,
   usageRoute,
 } from '@nocobase/app-plugin-agents/client/routes';
 import {
@@ -14,6 +15,7 @@ import {
   Rss,
   Server,
   SlidersHorizontal,
+  Sparkles,
   Tags,
 } from 'lucide-react';
 import {
@@ -160,6 +162,8 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
 // "Analyze again" can be handed to (`server/providers/feed/agent-reader.ts`): connecting a runtime, enabling the
 // agents it reports, and what their runs used. Each of those three stands behind its own page grant (`PAGES` in
 // `@nocobase/app-plugin-agents/shared/access`), which only unrestricted administrators hold until a role is given it.
+// Skills is the plugin's skill library: the skills people pick for reply drafts, ideas and briefs in Preferences
+// (`server/providers/feed/writing-skills.ts`) are created, imported and versioned there, behind its own page grant.
 const modelSettingsRoutes: AppClientRouteContribution = defineAppRoutes([
   {
     ...modelsRoute,
@@ -178,6 +182,12 @@ const modelSettingsRoutes: AppClientRouteContribution = defineAppRoutes([
     parent: 'settings',
     navigation: { title: 'navigation.runtimes', icon: Server },
     breadcrumb: { title: 'navigation.runtimes' },
+  },
+  {
+    ...skillsRoute,
+    parent: 'settings',
+    navigation: { title: 'navigation.skills', icon: Sparkles },
+    breadcrumb: { title: 'navigation.skills' },
   },
   {
     ...usageRoute,

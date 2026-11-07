@@ -95,3 +95,20 @@ export async function mapLimit<T, R>(
   );
   return results;
 }
+
+/**
+ * A rough guess of the script a text is written in, for choosing a writing skill: `zh` for mostly Han characters,
+ * `ja`/`ko` for kana/Hangul, `en` for Latin script, else null. (`postLanguage` in `replies.ts` is the careful one for
+ * replies.)
+ */
+export function scriptLanguageOf(text: string): string | null {
+  const count = (pattern: RegExp) => (text.match(pattern) ?? []).length;
+  const kana = count(/[぀-ヿ]/g);
+  const hangul = count(/[가-힯]/g);
+  const han = count(/[一-鿿]/g);
+  const latin = count(/[A-Za-z]/g);
+  if (kana >= 3) return 'ja';
+  if (hangul >= 3) return 'ko';
+  if (han >= 4 && han * 4 >= latin) return 'zh';
+  return latin >= 20 ? 'en' : null;
+}
