@@ -68,9 +68,16 @@ import {
 import {
   admit,
   DEFAULT_WAIT_HOURS,
+  holdForTime,
   isHoldGate,
+  isTimeGate,
   release,
   settleWatch,
+  timeCopy,
+  timeStatus,
+  withoutTimeCopy,
+  type TimeContext,
+  type TimeGate,
 } from './admission.js';
 import { coverOf } from './media.js';
 import { mapLimit, truncate } from './text.js';
@@ -526,6 +533,16 @@ const json = <T>(value: unknown, fallback: T): T => {
 };
 
 const bool = (value: unknown) => value === true || value === 1 || value === '1';
+
+/** The person kept the item: favourite, later, participated or notes. Nothing automatic hides it then. */
+const keptState = (state: Row | null): boolean =>
+  Boolean(
+    state &&
+    (bool(state.favorite) ||
+      bool(state.later) ||
+      bool(state.participated) ||
+      text(state.notes).trim()),
+  );
 
 const DEFAULT_COVERAGE: ItemCoverage = {
   body: { status: 'missing' },
@@ -2084,9 +2101,20 @@ export function createFeedService(deps: FeedServiceDeps) {
       .where('ownerId', '=', ownerId)
       .where('id', 'in', itemIds)
       .execute<Row>();
+    // Outside the time window, or of unknown age while one applies (issue #21): no model, no prefilter, no fetching;
+    // `writeAnalysis` holds it with the reason. "Analyze again" still gets the full analysis, held the same way.
+    const timed = new Set<number>();
+    if (!asked)
+      for (const row of rows)
+        if (
+          timeStatus(await timeContext(ownerId, row, { profile, source })) !==
+          'ok'
+        )
+          timed.add(Number(row.id));
     // A bare title waits only where fetching more is possible; elsewhere nothing would ever release it.
     const awaits = (row: Row) =>
       !asked &&
+      !timed.has(Number(row.id)) &&
       hasOnlyTitle(toAnalysisItem(row)) &&
       enrichableFor(
         String(row.platform),
@@ -2096,7 +2124,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       ? new Set<number>()
       : await prefilter(
           ownerId,
-          rows.filter((row) => !awaits(row)),
+          rows.filter((row) => !awaits(row) && !timed.has(Number(row.id))),
           topics,
           profile,
         );
@@ -2108,7 +2136,9 @@ export function createFeedService(deps: FeedServiceDeps) {
       );
       const item = toAnalysisItem(row);
       let draft: AnalysisDraft;
-      if (awaits(row))
+      if (timed.has(Number(row.id)))
+        draft = analyzeWithRules(item, topics, profile, locale);
+      else if (awaits(row))
         draft = awaitingMaterial(
           analyzeWithRules(item, topics, profile, locale),
           profile,
@@ -2155,13 +2185,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     ]);
     return {
       fromSearch: source?.topicId != null,
-      kept: Boolean(
-        state &&
-        (bool(state.favorite) ||
-          bool(state.later) ||
-          bool(state.participated) ||
-          text(state.notes).trim()),
-      ),
+      kept: keptState(state),
       asked,
       heat: row.heat == null ? null : Number(row.heat),
       publishedAt: new Date(
@@ -2177,9 +2201,74 @@ export function createFeedService(deps: FeedServiceDeps) {
     };
   }
 
+  /** Whether the time lookup (`resolvePublishedTimes`) can still give this item a publication time. */
+  function publishedLookupPending(row: Row, now = new Date()): boolean {
+    return (
+      PUBLISHED_PLATFORMS.includes(String(row.platform)) &&
+      adapters.collectorConfigured() &&
+      row.publishedCheckedAt == null &&
+      new Date((row.createdAt ?? now) as Date).getTime() >=
+        now.getTime() - PUBLISHED_WINDOW_MS
+    );
+  }
+
   /**
-   * Makes `draft` the item's current analysis; earlier ones stay as history. A search result passes the admission
-   * rules first, so a thin, unnoticed one is held back with the reason (`asked`: the person asked, so it never waits).
+   * What the time window (`timeStatus` in `admission.ts`) needs to know about one item. No window applies to what the
+   * person kept, to a tracked single post, to pushed items, or when the person keeps everything (`maxAgeDays` 0).
+   * `known` passes what the caller has already read.
+   */
+  async function timeContext(
+    ownerId: string,
+    row: Row,
+    known: { profile?: Profile; source?: Row | null; kept?: boolean } = {},
+  ): Promise<TimeContext> {
+    const profile = known.profile ?? (await getProfile(ownerId));
+    const source =
+      known.source !== undefined &&
+      (known.source == null
+        ? row.sourceId == null
+        : Number(known.source.id) === Number(row.sourceId))
+        ? known.source
+        : row.sourceId == null
+          ? null
+          : ((await repo('feedSources').findOne({
+              filter: { ownerId, id: Number(row.sourceId) },
+            })) as Row | null);
+    const kept =
+      known.kept ??
+      keptState(
+        (await repo('feedItemStates').findOne({
+          filter: { ownerId, itemId: Number(row.id) },
+        })) as Row | null,
+      );
+    const listed =
+      source != null &&
+      String(source.platform) !== INBOX_PLATFORM &&
+      !findOperation(String(source.platform), String(source.operation))
+        ?.operation.single;
+    const published = row.publishedAt
+      ? new Date(row.publishedAt as string | Date)
+      : null;
+    return {
+      maxAgeDays:
+        listed && !kept && profile.maxAgeDays > 0 ? profile.maxAgeDays : null,
+      publishedAt:
+        published && Number.isFinite(published.getTime()) ? published : null,
+      approximate: bool(row.publishedApproximate),
+      collectedAt: new Date((row.createdAt ?? new Date()) as Date),
+      lookupPending: publishedLookupPending(row),
+      locale: localeFor(
+        profile.locale,
+        `${profile.interests}${text(row.title)}`,
+      ),
+    };
+  }
+
+  /**
+   * Makes `draft` the item's current analysis; earlier ones stay as history. An item outside the person's time window,
+   * or of unknown age while one applies, is held for its time first (`undated`, `stale`); a search result then passes
+   * the admission rules, so a thin, unnoticed one is held back with the reason (`asked`: the person asked, so it never
+   * waits).
    */
   async function writeAnalysis(
     ownerId: string,
@@ -2187,10 +2276,13 @@ export function createFeedService(deps: FeedServiceDeps) {
     analysed: AnalysisDraft,
     { asked = false }: { asked?: boolean } = {},
   ) {
+    const context = await admissionContext(ownerId, row, { asked });
+    const timing = await timeContext(ownerId, row, { kept: context.kept });
+    const status = timeStatus(timing);
     const draft = admit(
       toAnalysisItem(row),
-      analysed,
-      await admissionContext(ownerId, row, { asked }),
+      status === 'ok' ? analysed : holdForTime(analysed, status, timing),
+      context,
     );
     await database.transaction(async (connection) => {
       await connection.query
@@ -2841,6 +2933,8 @@ export function createFeedService(deps: FeedServiceDeps) {
     })) as Row | null;
     if (current && current.engine === 'model' && current.gate == null)
       return false;
+    // Attention does not make an old item new, nor an undated one dated.
+    if (current && isTimeGate(current.gate)) return false;
     // Held back by the admission rules for being thin and unnoticed: a model that judged it already said what it is
     // worth, so the attention lets it in without asking again.
     if (current && current.engine !== 'rules' && isHoldGate(current.gate)) {
@@ -3048,38 +3142,41 @@ export function createFeedService(deps: FeedServiceDeps) {
    * found nothing is not repeated for a day; one the Collector could not make (sign-in, rate limit, no Collector) is
    * tried again on the next tick. When the page gives only the day (YouTube asking its viewer to sign in), the time
    * stays approximate, set to that day unless the stored one already agrees, and is looked up again a day later.
-   * Returns how many videos got an exact time.
+   * Items without any time come first: while the person keeps a time window they are held until it is known. Every
+   * copy looked up is judged against its owner's window again (`rejudgeTime`). Returns how many videos got an exact
+   * time.
    */
   async function resolvePublishedTimes({
     limit = PUBLISHED_PER_TICK,
     now = new Date(),
   }: { limit?: number; now?: Date } = {}): Promise<number> {
     if (!adapters.collectorConfigured()) return 0;
-    const rows = await database
-      .query()
-      .selectFrom('feedItems')
-      .select(['id', 'platform', 'externalId', 'url', 'publishedAt'])
-      .where('platform', 'in', PUBLISHED_PLATFORMS)
-      .where((eb) =>
-        eb.or([
-          eb('publishedAt', 'is', null),
-          eb('publishedApproximate', '=', true),
-        ]),
-      )
-      .where((eb) =>
-        eb.or([
-          eb('publishedCheckedAt', 'is', null),
-          eb(
-            'publishedCheckedAt',
-            '<',
-            new Date(now.getTime() - PUBLISHED_RECHECK_MS),
-          ),
-        ]),
-      )
-      .where('createdAt', '>=', new Date(now.getTime() - PUBLISHED_WINDOW_MS))
-      .orderBy('id', 'desc')
-      .limit(limit * 5)
-      .execute<Row>();
+    const candidates = (undated: boolean) =>
+      database
+        .query()
+        .selectFrom('feedItems')
+        .select(['id', 'platform', 'externalId', 'url', 'publishedAt'])
+        .where('platform', 'in', PUBLISHED_PLATFORMS)
+        .where((eb) =>
+          undated
+            ? eb('publishedAt', 'is', null)
+            : eb('publishedApproximate', '=', true),
+        )
+        .where((eb) =>
+          eb.or([
+            eb('publishedCheckedAt', 'is', null),
+            eb(
+              'publishedCheckedAt',
+              '<',
+              new Date(now.getTime() - PUBLISHED_RECHECK_MS),
+            ),
+          ]),
+        )
+        .where('createdAt', '>=', new Date(now.getTime() - PUBLISHED_WINDOW_MS))
+        .orderBy('id', 'desc')
+        .limit(limit * 5)
+        .execute<Row>();
+    const rows = [...(await candidates(true)), ...(await candidates(false))];
     const deadline = Date.now() + PUBLISHED_BUDGET_MS;
     const seen = new Set<string>();
     let asked = 0;
@@ -3158,8 +3255,178 @@ export function createFeedService(deps: FeedServiceDeps) {
         )
         .execute();
       if (exact) resolved += 1;
+      try {
+        await rejudgeTime(platform, externalId);
+      } catch (error) {
+        deps.log('warn', 'feed time window check failed', {
+          platform,
+          externalId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     return resolved;
+  }
+
+  /**
+   * Judges every copy of one item against its owner's time window again, after its time was looked up (issue #21). An
+   * item held for an unknown time gets the analysis it skipped once its time is inside the window, is held as `stale`
+   * when it is older, and says so when the time could still not be read. An item already in the feed, or waiting to
+   * come in (material, watching, thin), that turns out older than the window is held as `stale`. Never touches what the
+   * person kept.
+   */
+  async function rejudgeTime(
+    platform: string,
+    externalId: string,
+  ): Promise<void> {
+    const rows = await database
+      .query()
+      .selectFrom('feedItems as i')
+      .innerJoin('feedAnalyses as a', (join) =>
+        join.onRef('a.itemId', '=', 'i.id').on('a.current', '=', true),
+      )
+      .selectAll('i')
+      .select([
+        'a.id as analysisId',
+        'a.verdict as currentVerdict',
+        'a.gate as currentGate',
+        'a.heldVerdict as currentHeldVerdict',
+        'a.uncertainty as currentUncertainty',
+      ])
+      .where('i.platform', '=', platform)
+      .where('i.externalId', '=', externalId)
+      .execute<Row>();
+    for (const row of rows) {
+      const ownerId = String(row.ownerId);
+      const timing = await timeContext(ownerId, row);
+      const status = timeStatus(timing);
+      const gate = row.currentGate as AnalysisGate | null;
+      if (gate === 'undated' && status === 'ok') {
+        await analyzeItems(
+          ownerId,
+          [Number(row.id)],
+          row.sourceId == null ? null : Number(row.sourceId),
+        );
+        continue;
+      }
+      if (status === 'ok' || gate === 'stale') continue;
+      const verdict = row.currentVerdict as Verdict;
+      const waiting =
+        gate === 'undated' ||
+        verdict !== 'ignore' ||
+        (gate != null && (isHoldGate(gate) || gate === 'awaitingMaterial'));
+      if (!waiting) continue;
+      await holdAnalysisForTime(row, status, timing);
+    }
+  }
+
+  /** Holds a stored current analysis for its time, keeping the verdict it would have had. */
+  async function holdAnalysisForTime(
+    row: Row,
+    status: TimeGate,
+    timing: TimeContext,
+  ) {
+    const verdict = row.currentVerdict as Verdict;
+    await database
+      .query()
+      .updateTable('feedAnalyses')
+      .set({
+        verdict: 'ignore',
+        gate: status,
+        heldVerdict:
+          row.currentHeldVerdict ?? (verdict !== 'ignore' ? verdict : null),
+        watchUntil: null,
+        uncertainty: [
+          timeCopy(status, timing),
+          withoutTimeCopy(row.currentUncertainty as string | null),
+        ]
+          .filter(Boolean)
+          .join(' '),
+      })
+      .where('id', '=', Number(row.analysisId))
+      .execute();
+  }
+
+  /**
+   * Applies the person's time window to items already collected (issue #21): what is in the feed, or waiting to come in,
+   * and was published before the window is held as `stale`; what has no publication time while a window applies is held
+   * as `undated` until the scheduled lookup finds one. Never touches what the person kept (favourite, later,
+   * participated, notes) or dismissed, never shows anything, and calls no model. `dryRun` changes nothing.
+   */
+  async function reapplyTimeWindow(
+    options: { dryRun?: boolean; now?: Date } = {},
+  ): Promise<{
+    checked: number;
+    stale: { title: string; publishedAt: string; approximate: boolean }[];
+    undated: string[];
+  }> {
+    const rows = await database
+      .query()
+      .selectFrom('feedAnalyses as a')
+      .innerJoin('feedItems as i', 'i.id', 'a.itemId')
+      .selectAll('i')
+      .select([
+        'a.id as analysisId',
+        'a.verdict as currentVerdict',
+        'a.gate as currentGate',
+        'a.heldVerdict as currentHeldVerdict',
+        'a.uncertainty as currentUncertainty',
+      ])
+      .where('a.current', '=', true)
+      .where('i.sourceId', 'is not', null)
+      .where((eb) =>
+        eb.or([
+          eb.and([
+            eb('a.verdict', 'in', ['discuss', 'learn']),
+            eb('a.gate', 'is', null),
+          ]),
+          eb('a.gate', 'in', [
+            'awaitingMaterial',
+            'watching',
+            'thin',
+            'reply',
+            'undated',
+          ]),
+        ]),
+      )
+      .orderBy('i.id', 'asc')
+      .execute<Row>();
+    const stale: {
+      title: string;
+      publishedAt: string;
+      approximate: boolean;
+    }[] = [];
+    const undated: string[] = [];
+    const profiles = new Map<string, Profile>();
+    for (const row of rows) {
+      await yieldToRequests();
+      const ownerId = String(row.ownerId);
+      const state = (await repo('feedItemStates').findOne({
+        filter: { ownerId, itemId: Number(row.id) },
+      })) as Row | null;
+      if (state && bool(state.dismissed)) continue;
+      let profile = profiles.get(ownerId);
+      if (!profile) {
+        profile = await getProfile(ownerId);
+        profiles.set(ownerId, profile);
+      }
+      const timing = await timeContext(ownerId, row, {
+        profile,
+        kept: keptState(state),
+      });
+      const status = timeStatus(timing);
+      if (status === 'ok' || status === row.currentGate) continue;
+      if (status === 'stale')
+        stale.push({
+          title: text(row.title),
+          publishedAt: timing.publishedAt!.toISOString(),
+          approximate: timing.approximate,
+        });
+      else undated.push(text(row.title));
+      if (options.dryRun) continue;
+      await holdAnalysisForTime(row, status, timing);
+    }
+    return { checked: rows.length, stale, undated };
   }
 
   function enrichableFor(
@@ -4651,6 +4918,7 @@ export function createFeedService(deps: FeedServiceDeps) {
     briefPending,
     reapplyWorth,
     reapplyAdmission,
+    reapplyTimeWindow,
     settleWatching,
     judgeCase,
     summary,

@@ -73,6 +73,8 @@ const zhCN: AppResource = {
       thin: '内容单薄且没有热度',
       reply: '没有干货的回复',
       watching: '新帖观察中',
+      undated: '发布时间未知',
+      stale: '早于时间窗口',
     },
     views: {
       digest: '今日简报',
@@ -109,7 +111,7 @@ const zhCN: AppResource = {
       approximate: '约{{time}}',
       approximateHint:
         '平台只给了“3 周前”这样的相对时间，按它推算约为 {{time}} 发布；确切时间稍后补全',
-      collected: '收录于{{time}}',
+      unknown: '发布时间未知 · 收录于{{time}}',
       collectedHint: '平台没有给出发布时间，这是收录时间：{{time}}',
     },
     read: {

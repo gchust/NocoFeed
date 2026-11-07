@@ -271,12 +271,14 @@ async function setUp(
         items: [
           {
             externalId: `${run}-discuss`,
+            publishedAt: new Date().toISOString(),
             title: 'Postgres backups restored in minutes',
             body: 'We cut the restore time from 3 hours to 4 minutes, and this is how it works.',
             coverage,
           },
           {
             externalId: `${run}-learn`,
+            publishedAt: new Date().toISOString(),
             title: 'Postgres internals reading list',
             body: 'A list of what to read about the planner.',
             coverage,

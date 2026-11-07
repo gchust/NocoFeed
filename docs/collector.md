@@ -34,7 +34,8 @@ Lists new candidates for one subscription.
 a single tracked item) when the person keeps a time window (`feedProfiles.maxAgeDays`, 7 days by default): the window's
 start on a subscription's first run, afterwards a day before its last successful run, never earlier than the window.
 Narrow the platform search with it where the platform can (a date range, a "past week" filter, `since:` operators), and
-drop items whose `publishedAt` is earlier; keep items whose date is unknown. A Collector that answers `400` to a request
+drop items whose `publishedAt` is earlier; keep items whose date is unknown (NocoFeed holds them until their time is
+looked up). A Collector that answers `400` to a request
 with `since` is asked again without it, and for the next hour not at all; NocoFeed filters every answer by `publishedAt`
 itself either way, so an older Collector keeps working.
 
@@ -107,8 +108,10 @@ Answer:
 - `publishedAt` is an ISO instant. A platform that lists only relative text ("3 weeks ago", YouTube search) may send
   the time it stands for — now less the stated age, the latest moment the text allows — with
   `"publishedAtApproximate": true`; NocoFeed shows it as "about 3 weeks ago" and looks up the exact time later
-  (`want: ["published"]` below). Text that is not understood gives no `publishedAt`; never send the collection time as
-  the publication time. NocoFeed then shows the item as "collected …".
+  (`want: ["published"]` below). Text that is not understood gives no `publishedAt` (the reference Collector adds
+  `"publishedAtUnknown": true` so the answer says so); never send the collection time as the publication time. NocoFeed
+  shows such an item as "publication time unknown · collected …" and, while the person keeps a time window, holds it
+  out of the feed until the lookup finds its time (`undated`, then judged; one older than the window is `stale`).
 - Counts that are unknown are **omitted**, never `0`. `coverage` states, per part, what was read (`available`,
   `partial`, `missing`, `unavailable`, `notRequested`, `failed`) and why (`note`). The analysis only reasons about parts
   marked as read.

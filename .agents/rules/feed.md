@@ -330,6 +330,11 @@ ideas are still written at once, without the panel.
   `quality >= SOLID_QUALITY` (60, so only model analyses) and sorts by quality. The client opens both in that order
   (`defaultSort`). The digest leads with the three hottest recommendations published in the last day and does not
   repeat them below. HN `top` and `best` are ranked lists: they are never `truncated`, since they are not in time order.
+- **Time window** (`maxAgeDays`, issue #21). A run drops what is dated before the window; an item from a list with no
+  publication time is held (`gate: undated`, no model call) until `resolvePublishedTimes` reads it (YouTube, a few per
+  tick, undated first), then `rejudgeTime` analyses it or holds it as `stale`; an approximate time (relative text, or
+  only the day) gets a day's grace. Kept items, tracked single posts and pushed items are exempt; attention never
+  releases a time gate. `feed reapply-window` (dry run unless `--apply`) applies the window to items already collected.
 - Measure a change to these before shipping it: `feed evaluate` and `feed export-labels`, see `docs/feed-evaluation.md`.
 - **Publication times.** `publishedAt` is null when the platform gave none; `timelineAt` then holds the collection time
   so the item can still be placed, and the feed labels it "collected …" — never as the publication time.

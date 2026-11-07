@@ -46,20 +46,28 @@ describe('itemTime', () => {
     expect(en.dateTime).toBe(item.publishedAt);
     const zh = itemTime(translator(zhCN as never) as never, item, 'zh-CN', NOW);
     expect(zh.text).toBe('约3周前');
+    // A day read from the video page, also approximate: "about 3 days ago".
+    const day = itemTime(
+      translator(zhCN as never) as never,
+      { ...item, publishedAt: at(3 * DAY) },
+      'zh-CN',
+      NOW,
+    );
+    expect(day.text).toBe('约3天前');
     expect(zh.title).toContain('相对时间');
   });
 
-  it('labels the collection time when the platform gave no publication time', () => {
+  it('says the publication time is unknown rather than showing only the collection time', () => {
     const item = {
       publishedAt: null,
       publishedApproximate: false,
       createdAt: at(13 * MINUTE),
     };
     const en = itemTime(translator(enUS) as never, item, 'en-US', NOW);
-    expect(en.text).toBe('collected 13 minutes ago');
+    expect(en.text).toBe('publication time unknown · collected 13 minutes ago');
     expect(en.dateTime).toBe(item.createdAt);
     const zh = itemTime(translator(zhCN as never) as never, item, 'zh-CN', NOW);
-    expect(zh.text).toBe('收录于13分钟前');
+    expect(zh.text).toBe('发布时间未知 · 收录于13分钟前');
     expect(zh.title).toContain('没有给出发布时间');
   });
 
@@ -70,6 +78,6 @@ describe('itemTime', () => {
       'en-US',
       NOW,
     );
-    expect(time.text).toBe('collected 2 days ago');
+    expect(time.text).toBe('publication time unknown · collected 2 days ago');
   });
 });

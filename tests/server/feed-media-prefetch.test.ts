@@ -102,6 +102,7 @@ async function setUp(
         items: Array.from({ length: count }, (_, index) => ({
           externalId: externalId(index + 1),
           url: `https://www.xiaohongshu.com/explore/${externalId(index + 1)}`,
+          publishedAt: new Date().toISOString(),
           title: `手冲咖啡 ${index + 1}`,
           coverage: titleOnly,
         })),

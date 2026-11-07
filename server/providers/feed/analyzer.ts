@@ -106,10 +106,17 @@ export const PREFILTER_VERSION = 'prefilter-1';
 
 /**
  * Why an item is not shown as recommended although it may concern the person: `prefilter` and `awaitingMaterial` stopped
- * the full analysis; `thin`, `reply` and `watching` are the admission rules for search results (`admission.ts`).
+ * the full analysis; `thin`, `reply` and `watching` are the admission rules for search results; `undated` and `stale`
+ * hold an item of unknown age, or one older than the person's time window (`admission.ts`).
  */
 export type AnalysisGate =
-  'prefilter' | 'awaitingMaterial' | 'thin' | 'reply' | 'watching';
+  | 'prefilter'
+  | 'awaitingMaterial'
+  | 'thin'
+  | 'reply'
+  | 'watching'
+  | 'undated'
+  | 'stale';
 
 const CONTENT_TYPES = [
   'release',

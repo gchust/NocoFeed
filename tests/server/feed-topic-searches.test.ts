@@ -226,6 +226,7 @@ test('a topic judges what other subscriptions bring in, and always its own searc
         items: [
           {
             externalId: `topic-search-${(collected += 1)}`,
+            publishedAt: new Date().toISOString(),
             title: 'Shipping an app with vibe coding',
             summary: 'What worked.',
             coverage: {

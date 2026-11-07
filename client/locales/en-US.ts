@@ -82,6 +82,8 @@ const enUS = {
       thin: 'Thin and unnoticed',
       reply: 'Reply without substance',
       watching: 'Watching: new post',
+      undated: 'Publication time unknown',
+      stale: 'Older than your time window',
     },
     views: {
       label: 'Views',
@@ -118,7 +120,7 @@ const enUS = {
       approximate: 'about {{time}}',
       approximateHint:
         'The platform only said something like "3 weeks ago": published around {{time}}. The exact time is looked up later.',
-      collected: 'collected {{time}}',
+      unknown: 'publication time unknown · collected {{time}}',
       collectedHint:
         'The platform gave no publication time; this is when it was collected: {{time}}',
     },
