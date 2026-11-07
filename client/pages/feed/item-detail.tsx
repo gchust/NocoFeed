@@ -917,11 +917,15 @@ export function ItemDetail({
 
       <Separator />
 
-      <AskSection key={item.id} itemId={item.id} />
+      {/*
+        Sibling keys must differ: with Ask and Ideas both keyed by the item id, React lost track of the Ask section on
+        every redraw and left its old copies on the page, empty and unusable (feedback #18).
+      */}
+      <AskSection key={`ask:${item.id}`} itemId={item.id} />
 
       <Separator />
 
-      <IdeasSection key={item.id} itemId={item.id} />
+      <IdeasSection key={`ideas:${item.id}`} itemId={item.id} />
 
       <Separator />
 

@@ -368,6 +368,12 @@ The detail has an "Ask about this item" section (`client/pages/feed/ask.tsx`, `s
 - **Unconfigured.** Without a chat model the section shows a notice linking to `/settings/models` and Preferences; the
   runner path also needs the model, because the conversation it answers into is a native session.
 - Answers render as Markdown without raw HTML or images; links open in a new tab with `noopener noreferrer`.
+- **No silent gaps** (feedback #18). An answer that failed, came back with nothing to show, or never came (the last
+  message is the question) says so with "Retry", which is the plugin's resend (`regenerate` with `resendInput`: the
+  question stays, what follows it is replaced). Loading the section shows a spinner line; a section that cannot be
+  read says so with "Retry" instead of disappearing. On the detail, sibling sections need distinct keys
+  (`ask:<id>`, `ideas:<id>`): with the same key React lost track of the Ask section on every redraw and left dead
+  copies of it on the page (`feed-page.test.tsx` checks there is one and that React reports no duplicate keys).
 - Tests: `tests/server/feed-ask.test.ts` (sessions, other owner's 404, unconfigured, context, a fake OpenAI-compatible
   model calling `feed_read_item` — and `feed_read_comments` on an X post without a Collector, whose structured failure
   reaches the model — through the real chat route, persistence and clearing, runner queue/assembly/answer),
