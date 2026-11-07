@@ -11,6 +11,7 @@ import {
   GlobeIcon,
   MessageCircleQuestionIcon,
   MessagesSquareIcon,
+  RotateCcwIcon,
   SearchIcon,
   SendIcon,
   SquareIcon,
@@ -33,7 +34,6 @@ import remarkGfm from 'remark-gfm';
 import { SessionExpiredAlert } from '#components/session-expired-alert';
 import { Alert, AlertDescription, AlertTitle } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
-import { Skeleton } from '#components/ui/skeleton';
 import { Spinner } from '#components/ui/spinner';
 import { Textarea } from '#components/ui/textarea';
 
@@ -267,6 +267,16 @@ function NoticeBlock({
   return null;
 }
 
+/** Whether an agent message has anything to show: text, a tool it used or a notice. */
+function hasContent(message: AppUIMessage): boolean {
+  return message.parts.some(
+    (part) =>
+      (part.type === 'text' && part.text.trim() !== '') ||
+      part.type === 'data-notice' ||
+      part.type.startsWith('tool-'),
+  );
+}
+
 function MessageView({
   message,
   agentName,
@@ -334,8 +344,20 @@ function AskChat({
     () => chatApi.transport(conversationId, () => undefined),
     [chatApi, conversationId],
   );
-  const { messages, sendMessage, status, stop, setMessages, error } =
-    useChat<AppUIMessage>({ id: conversationId, messages: history, transport });
+  const {
+    messages,
+    sendMessage,
+    regenerate,
+    status,
+    stop,
+    setMessages,
+    error,
+    clearError,
+  } = useChat<AppUIMessage>({
+    id: conversationId,
+    messages: history,
+    transport,
+  });
   const [draft, setDraft] = useState('');
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [problem, setProblem] = useState<RequestProblem>();
@@ -409,7 +431,27 @@ function AskChat({
   };
 
   const visible = messages.filter((message) => message.role !== 'system');
-  const lastIsUser = visible.at(-1)?.role === 'user';
+  const last = visible.at(-1);
+  const lastIsUser = last?.role === 'user';
+  /** The question the latest answer belongs to: what "Retry" asks again. */
+  const lastQuestion = visible.findLast((message) => message.role === 'user');
+  // An answer that failed, or ended with nothing in it, says so and offers to ask again rather than showing nothing.
+  const unanswered =
+    !busy &&
+    !state.runnerPending &&
+    Boolean(lastQuestion) &&
+    (Boolean(error) || lastIsUser || (last ? !hasContent(last) : false));
+
+  const retry = (): void => {
+    if (!lastQuestion || busy) return;
+    clearError();
+    setProblem(undefined);
+    // The plugin's own resend: the question stays, everything after it (an empty or broken answer) is replaced.
+    void regenerate({
+      messageId: lastQuestion.id,
+      body: { resendInput: { messageId: lastQuestion.id } },
+    });
+  };
 
   return (
     <div className='flex flex-col gap-3'>
@@ -439,10 +481,18 @@ function AskChat({
         </div>
       ) : null}
 
-      {error ? (
-        <p role='alert' className='text-sm text-destructive'>
-          {t('feed.ask.failed')}
-        </p>
+      {unanswered ? (
+        <div
+          role='alert'
+          className='flex flex-wrap items-center gap-2 text-sm text-destructive'
+          data-testid='feed-ask-unanswered'
+        >
+          <span>{t(error ? 'feed.ask.failed' : 'feed.ask.empty')}</span>
+          <Button type='button' size='sm' variant='outline' onClick={retry}>
+            <RotateCcwIcon data-icon='inline-start' />
+            {t('feed.ask.retry')}
+          </Button>
+        </div>
       ) : null}
       {problem === 'sessionExpired' ? (
         <SessionExpiredAlert />
@@ -746,13 +796,44 @@ export function AskSection({
     </h3>
   );
 
-  // Nothing to show when the section could not be read: the rest of the item still is.
-  if (loaded?.failed) return null;
+  const reloadAll = () => {
+    setFirst(null);
+    setLoaded(undefined);
+    setReloadCount((count) => count + 1);
+  };
+
+  if (loaded?.failed)
+    return (
+      <section
+        aria-labelledby='feed-ask'
+        className='flex flex-col gap-2'
+        data-testid='feed-ask'
+      >
+        {heading}
+        <div
+          role='alert'
+          className='flex flex-wrap items-center gap-2 text-sm text-destructive'
+        >
+          <span>{t('feed.ask.loadFailed')}</span>
+          <Button type='button' size='sm' variant='outline' onClick={reloadAll}>
+            <RotateCcwIcon data-icon='inline-start' />
+            {t('feed.ask.retry')}
+          </Button>
+        </div>
+      </section>
+    );
   if (!loaded?.state)
     return (
-      <section aria-labelledby='feed-ask' className='flex flex-col gap-2'>
+      <section
+        aria-labelledby='feed-ask'
+        aria-busy='true'
+        className='flex flex-col gap-2'
+        data-testid='feed-ask'
+      >
         {heading}
-        <Skeleton className='h-16 w-full' />
+        <p className='flex items-center gap-2 text-xs text-muted-foreground'>
+          <Spinner /> {t('feed.ask.loading')}
+        </p>
       </section>
     );
   const { state } = loaded;
@@ -760,11 +841,6 @@ export function AskSection({
   const runner =
     (state.runnerAgentId && agentOptions.nameOf(state.runnerAgentId)) ||
     t('feed.ask.runner.generic');
-  const reloadAll = () => {
-    setFirst(null);
-    setLoaded(undefined);
-    setReloadCount((count) => count + 1);
-  };
 
   return (
     <section

@@ -747,6 +747,87 @@ describe('feed page', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows one Ask section on the detail, however often it redraws (feedback #18)', async () => {
+    // The detail's sections answer, so Ask and Ideas both show; then the detail redraws a few times.
+    gate = (call) => {
+      if (call.method === 'GET' && call.path === 'feedItems/7/ask')
+        return Promise.resolve({
+          data: {
+            conversationId: null,
+            online: true,
+            webSearch: false,
+            runnerAgentId: null,
+            runnerPending: false,
+          },
+        });
+      if (call.method === 'GET' && call.path === 'feedItems/7/ideas')
+        return Promise.resolve({
+          data: {
+            available: true,
+            webSearch: false,
+            kinds: ['post'],
+            auto: false,
+            styleVersion: '1',
+            sets: [],
+          },
+        });
+      if (call.method === 'POST' && call.path === 'feedItems/7/enrich')
+        return Promise.resolve({
+          data: {
+            ...detail,
+            comments: [{ author: 'a', text: 'We use traces.', depth: 0 }],
+            coverage: { ...detail.coverage, comments: { status: 'available' } },
+            enrichable: [],
+          },
+        });
+      return undefined;
+    };
+    const consoleError = vi.spyOn(console, 'error');
+    const user = userEvent.setup();
+    await renderAt('/?item=7');
+    const askHeadings = () =>
+      screen.queryAllByRole('heading', { name: enUS.feed.ask.title });
+    expect(await screen.findByText(enUS.feed.ask.hint)).toBeVisible();
+    expect(askHeadings()).toHaveLength(1);
+
+    // Open and close the analysis, save a mark and fetch the discussion: each redraws the detail.
+    const analysis = screen.getByRole('button', {
+      name: new RegExp(enUS.feed.detail.analysis),
+    });
+    await user.click(analysis);
+    await user.click(analysis);
+    await user.click(
+      screen.getByRole('button', {
+        name: enUS.feed.state.favorite,
+        pressed: false,
+      }),
+    );
+    await user.click(await screen.findByRole('button', { name: /^Fetch / }));
+    expect(await screen.findByText('We use traces.')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getAllByText(enUS.feed.ask.hint)).toHaveLength(1),
+    );
+    expect(askHeadings()).toHaveLength(1);
+    expect(screen.queryAllByTestId('feed-ask')).toHaveLength(1);
+
+    // Its box takes a question.
+    const box = screen.getByRole('textbox', {
+      name: enUS.feed.ask.placeholder,
+    });
+    await user.type(box, 'What is this?');
+    expect(box).toHaveValue('What is this?');
+    expect(
+      screen.getByRole('button', { name: enUS.feed.ask.send }),
+    ).toBeEnabled();
+    // The cause: siblings with the same key, which React warns about.
+    expect(
+      consoleError.mock.calls.some((args) =>
+        String(args[0]).includes('two children with the same key'),
+      ),
+    ).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it('offers to sign in again when the session has ended', async () => {
     itemsResponse = Response.json(
       { error: { message: 'Unauthorized' } },
