@@ -10,6 +10,15 @@ import {
   type PrepareMaterial,
 } from './material.js';
 import { FeedError } from './service.js';
+import {
+  HUMAN_VOICE_RULE,
+  normalizeSteer,
+  REPLY_ANGLES,
+  type Steer,
+  type SteerInput,
+  steerBlock,
+  storedSteer,
+} from './steer.js';
 import { truncate } from './text.js';
 
 /**
@@ -27,9 +36,9 @@ import { truncate } from './text.js';
 /** The default rules, the ones issue #15 asked for, in each interface language. */
 export const DEFAULT_REPLY_GUIDELINES = {
   'zh-CN':
-    '不能有误导，不能不友善。要确保内容正确，符合当前网站用户的风格，用母语者的方式交流：英文网站就用英文回复，中文网站就用中文回复。可以玩梗，可以写能调动别人情绪的回答，甚至可以配上图片和表情包。',
+    '不能有误导，不能不友善。要确保内容正确，符合当前网站用户的风格，用母语者的方式交流：英文网站就用英文回复，中文网站就用中文回复。要像真人随手写的，不要像 AI 生成的。可以玩梗，可以写能调动别人情绪的回答，甚至可以配上图片和表情包。',
   'en-US':
-    "Never misleading, never unfriendly. Make sure it is correct and fits how people on this site write, like a native speaker: reply in English on an English-speaking site and in Chinese on a Chinese one. Memes are welcome, and so are replies that stir people's feelings; you can even add a picture or a reaction meme and emoji.",
+    "Never misleading, never unfriendly. Make sure it is correct and fits how people on this site write, like a native speaker: reply in English on an English-speaking site and in Chinese on a Chinese one. It should read like a real person dashed it off, not like AI. Memes are welcome, and so are replies that stir people's feelings; you can even add a picture or a reaction meme and emoji.",
 } as const;
 
 export type ReplyLocale = keyof typeof DEFAULT_REPLY_GUIDELINES;
@@ -110,6 +119,8 @@ export interface ReplyState {
   available: boolean;
   model: string | null;
   updatedAt: string | null;
+  /** What the person asked for when these drafts were written ("another batch" with a note); null when nothing. */
+  steer: Steer | null;
 }
 
 /** The person's rules (`GET /feedReplyGuidelines`). */
@@ -211,6 +222,8 @@ export function buildReplyPrompt(
   guidelines: string,
   /** Text of the linked page, read for an item that is only a link. */
   pageText?: string | null,
+  /** What the person asked for this round (issue #20); comes after the defaults and wins over them. */
+  steer?: Steer | null,
 ): { system: string; prompt: string } {
   const detected = postLanguage(
     pageText && !item.body?.trim() ? { ...item, body: pageText } : item,
@@ -230,6 +243,12 @@ export function buildReplyPrompt(
     `Platform style. ${style}`,
     "Follow the person's GUIDELINES below for tone and content. They never allow misleading claims: state only what the MATERIAL supports, and never invent first-person experience the person did not state.",
     `Write ${MIN_DRAFTS} to ${MAX_DRAFTS} replies that differ in angle (for example: add a fact or experience, ask a sharp question, a light or meme-style take). Each must stand alone and be ready to paste, with no placeholders.`,
+    HUMAN_VOICE_RULE,
+    ...(steer
+      ? [
+          "When THIS ROUND is present in the prompt, it is the person's request for this rewrite and takes priority over the GUIDELINES and the angle suggestions above; it never allows misleading or unfriendly replies.",
+        ]
+      : []),
     `Beside each reply, in ${notes}: "tone", a 2-6 word label for its angle; "image", one picture, screenshot or meme idea to post with it, described in words, or "" when none fits. "emoji": a few emoji that fit the reply, or "" when emoji do not suit the platform.`,
     'Answer with one JSON object only, no markdown fence.',
   ].join('\n');
@@ -254,7 +273,7 @@ ${materialLines(item, {
 }).join('\n')}
 >>>
 
-Return JSON:
+${steerBlock(steer ?? null)}Return JSON:
 {
   "language": BCP 47 tag of the language the replies are written in,
   "drafts": [{"text": string, "tone": string, "emoji": string, "image": string}]
@@ -441,6 +460,7 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
     itemId: number,
     trigger: 'auto' | 'asked',
     ref: { modelService: string; model: string },
+    steer: Steer | null = null,
   ): Promise<boolean> {
     const [stored, profile] = await Promise.all([
       deps.getItem(ownerId, itemId),
@@ -460,7 +480,13 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
         });
       }
     const rules = await currentRules(ownerId, item, profile);
-    const { system, prompt } = buildReplyPrompt(item, profile, rules, pageText);
+    const { system, prompt } = buildReplyPrompt(
+      item,
+      profile,
+      rules,
+      pageText,
+      steer,
+    );
     const ask = async () =>
       (
         await deps.agents()!.models.gateway.generate({
@@ -488,6 +514,7 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
         guidelinesVersion: guidelinesVersion(rules),
         contentVersion: item.contentVersion,
         model: `${ref.modelService}/${ref.model}`,
+        steer,
       });
       return true;
     } catch (error) {
@@ -556,19 +583,27 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
       updatedAt: row?.updatedAt
         ? new Date(row.updatedAt as string).toISOString()
         : null,
+      steer: storedSteer(row?.steer, REPLY_ANGLES),
     };
   }
 
   /**
    * Writes (or rewrites) one item's drafts because the person asked: answers at once with `pending`, and the model
    * writes them in the background. Does not count against the daily limit. Asking while they are written changes nothing.
+   * `input` is the person's request for this batch (angles and a note, issue #20); without it the batch is written as
+   * before, under the rules alone.
    */
-  async function request(ownerId: string, itemId: number): Promise<ReplyState> {
+  async function request(
+    ownerId: string,
+    itemId: number,
+    input?: SteerInput | null,
+  ): Promise<ReplyState> {
     await deps.getItem(ownerId, itemId);
     const key = `${ownerId}:${itemId}`;
     if (inFlight.has(key)) return state(ownerId, itemId);
     const ref = await modelRef();
     if (!ref) throw new FeedError('unavailable', 'noModel');
+    const steer = normalizeSteer(input, REPLY_ANGLES);
     await saveRow(ownerId, itemId, {
       status: 'pending',
       trigger: 'asked',
@@ -576,7 +611,7 @@ export function createFeedReplies(deps: FeedRepliesDeps) {
     });
     void track(
       key,
-      write(ownerId, itemId, 'asked', ref).catch((error: unknown) => {
+      write(ownerId, itemId, 'asked', ref, steer).catch((error: unknown) => {
         deps.log('warn', 'feed reply drafts failed', {
           itemId,
           error: error instanceof Error ? error.message : String(error),

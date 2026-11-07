@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { STEER_NOTE_MAX } from '../providers/feed/steer.js';
 
 const PUBLIC_PLATFORMS = [
   'reddit',
@@ -695,3 +696,31 @@ export const FeedDigestSchema = z
     learn: z.array(FeedListItemSchema),
   })
   .meta({ ref: 'FeedDigest' });
+
+/** What the person asked for when writing again (issue #20): picked angles and a free note. */
+export const SteerSchema = z
+  .object({
+    angles: z.array(z.string()),
+    note: z.string(),
+  })
+  .meta({ id: 'FeedSteer' });
+
+/** The optional request body that steers one rewrite; the note is cleaned and cut on the server again. */
+export function steerBody<const T extends readonly [string, ...string[]]>(
+  angles: T,
+) {
+  return z.object({
+    angles: z
+      .array(z.enum(angles))
+      .max(angles.length)
+      .optional()
+      .meta({ description: 'Directions picked from the list' }),
+    note: z
+      .string()
+      .max(STEER_NOTE_MAX)
+      .optional()
+      .meta({
+        description: `A free note, at most ${STEER_NOTE_MAX} characters`,
+      }),
+  });
+}

@@ -475,6 +475,45 @@ test('custom rules go into the prompt, and asking writes in the background', asy
   ).toBeNull();
 });
 
+test('another batch carries the person’s note, and a plain batch is written as before (issue #20)', async ({
+  testApp,
+}) => {
+  const { replies, ownerId, generate, idOf } = await setUp(testApp);
+  const id = idOf('learn');
+
+  await replies.request(ownerId, id, {
+    angles: ['askHelp', 'unknown', 'humor'],
+    note: '  站在独立开发者角度 <script>x</script> ',
+  });
+  await replies.idle();
+  const steered = replyCalls(generate).at(-1)!;
+  expect(steered.prompt).toContain('THIS ROUND');
+  expect(steered.prompt).toContain('站在独立开发者角度 x');
+  expect(steered.prompt).not.toContain('<script>');
+  expect(steered.prompt).toContain('ask the thread for help');
+  const state = await replies.state(ownerId, id);
+  expect(state).toMatchObject({
+    status: 'ready',
+    trigger: 'asked',
+    steer: { angles: ['humor', 'askHelp'], note: '站在独立开发者角度 x' },
+  });
+
+  // "Just a new batch": no request, the prompt as before, and the card no longer says it followed a note.
+  await replies.request(ownerId, id);
+  await replies.idle();
+  const plain = replyCalls(generate).at(-1)!;
+  expect(plain.prompt).not.toContain('THIS ROUND');
+  expect(plain.prompt).not.toContain('独立开发者');
+  const after = await replies.state(ownerId, id);
+  expect(after).toMatchObject({ status: 'ready', steer: null });
+  expect(after.drafts.length).toBeGreaterThanOrEqual(3);
+
+  // A note of only spaces is no note.
+  await replies.request(ownerId, id, { angles: [], note: '   ' });
+  await replies.idle();
+  expect(replyCalls(generate).at(-1)!.prompt).not.toContain('THIS ROUND');
+});
+
 test('a failed answer keeps the earlier drafts and says so', async ({
   testApp,
 }) => {
@@ -548,8 +587,35 @@ test('the reply routes need a session and answer only the caller’s items', asy
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
   expect((await admin.fetch('/feedItems/987654/replies')).status).toBe(404);
   expect(
-    (await admin.fetch('/feedItems/987654/replies', json('POST'))).status,
+    (await admin.fetch('/feedItems/987654/replies', json('POST', {}))).status,
   ).toBe(404);
+  // Without any body, as before issue #20.
+  expect(
+    (
+      await admin.fetch('/feedItems/987654/replies', {
+        method: 'POST',
+        headers: { origin: ORIGIN },
+      })
+    ).status,
+  ).toBe(404);
+  expect(
+    (
+      await admin.fetch(
+        '/feedItems/987654/replies',
+        json('POST', { angles: ['humor'], note: '更口语一点' }),
+      )
+    ).status,
+  ).toBe(404);
+  // The note is limited, and the angles are the known ones.
+  for (const body of [
+    { note: 'x'.repeat(501) },
+    { angles: ['flattery'] },
+    { note: 3 },
+  ])
+    expect(
+      (await admin.fetch('/feedItems/987654/replies', json('POST', body)))
+        .status,
+    ).toBe(400);
 
   const saved = await admin.fetch(
     '/feedReplyGuidelines',

@@ -401,6 +401,53 @@ const zhCN: AppResource = {
       rulesHint: '草稿使用原帖所在网站的语言和风格，并遵循你的回复准则。',
       editRules: '修改回复准则',
     },
+    // 换一批时的意见（`steer.tsx`、`server/providers/feed/steer.ts`，issue #20）。
+    steer: {
+      title: {
+        replies: '这一批想换成什么样？',
+        ideas: '新点子想换成什么样？',
+        ideaAgain: '下一个想换成什么样？',
+      },
+      submit: {
+        replies: '按意见换一批',
+        ideas: '按意见重新生成',
+        ideaAgain: '按意见再来一个',
+      },
+      plain: {
+        replies: '直接换一批',
+        ideas: '直接重新生成',
+        ideaAgain: '直接再来一个',
+      },
+      placeholder: {
+        replies:
+          '还有什么要求？例如「更口语一点」「别那么客套」「站在独立开发者角度」',
+        ideas: '还有什么要求？例如「更接地气」「面向学生党」「开头别铺垫」',
+      },
+      anglesLabel: '方向（可多选）',
+      noteLabel: '你的意见',
+      count: '{{count}}/{{max}}',
+      cancel: '取消',
+      applied: '按你的意见：{{steer}}',
+      separator: '、',
+      angles: {
+        replies: {
+          askDetail: '追问细节',
+          experience: '分享亲身经历',
+          pushBack: '反驳/唱反调',
+          addSource: '补充资料',
+          humor: '幽默玩梗',
+          agree: '简短附和',
+          askHelp: '提问求助',
+        },
+        ideas: {
+          downToEarth: '更接地气',
+          controversial: '更有争议',
+          shorter: '更短',
+          funnier: '更搞笑',
+          newPersona: '换个人设',
+        },
+      },
+    },
     // 详情里的“追问”（`ask.tsx`、`server/providers/feed/ask.ts`）。
     ask: {
       title: '追问',

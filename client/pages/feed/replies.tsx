@@ -15,6 +15,8 @@ import { Skeleton } from '#components/ui/skeleton';
 import { Spinner } from '#components/ui/spinner';
 
 import { requestProblem } from './format.js';
+import { SteerApplied, SteerPanel } from './steer.js';
+import { rememberedSteer, rememberSteer, type Steer } from './steer-model.js';
 
 /** One reply the person can copy (`server/providers/feed/replies.ts`). */
 export interface ReplyDraft {
@@ -39,6 +41,8 @@ export interface ReplyState {
   readonly available: boolean;
   readonly model: string | null;
   readonly updatedAt: string | null;
+  /** What the person asked for when these drafts were written; null when nothing. */
+  readonly steer: Steer | null;
 }
 
 const POLL_MS = 2_000;
@@ -55,6 +59,7 @@ function languageName(tag: string, locale: string): string {
  * "Join the discussion": replies to copy, written in the post's language and the platform's style under the person's
  * own rules (Preferences). Discussions get them without being asked; any item gets them on "Write replies". Writing
  * runs in the background and this section polls until it ends. Copying never marks the item joined; the toast offers it.
+ * "New batch" first opens the steer panel (issue #20): directions and a note for this batch, or a batch without them.
  */
 export function ReplyDrafts({
   itemId,
@@ -75,6 +80,7 @@ export function ReplyDrafts({
   const [loadFailed, setLoadFailed] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [poll, setPoll] = useState(0);
+  const [steering, setSteering] = useState(false);
   const participatedRef = useRef(participated);
   useEffect(() => {
     participatedRef.current = participated;
@@ -108,12 +114,15 @@ export function ReplyDrafts({
     return () => clearTimeout(timer);
   }, [pending, state]);
 
-  const write = async (): Promise<void> => {
+  const write = async (steer?: Steer): Promise<void> => {
     setRequesting(true);
+    setSteering(false);
+    if (steer) rememberSteer('replies', steer);
     try {
       const { data } = await api.request<{ data: ReplyState }>({
         path: `feedItems/${encodeURIComponent(itemId)}/replies`,
         method: 'POST',
+        json: steer ? { angles: steer.angles, note: steer.note } : {},
       });
       setState(data);
     } catch (error: unknown) {
@@ -184,7 +193,11 @@ export function ReplyDrafts({
             variant='outline'
             className='ml-auto'
             disabled={busy}
-            onClick={() => void write()}
+            aria-expanded={drafts.length ? steering : undefined}
+            onClick={() =>
+              // The first drafts are written at once; another batch asks what should change first.
+              drafts.length ? setSteering((open) => !open) : void write()
+            }
           >
             {busy ? (
               <Spinner data-icon='inline-start' />
@@ -196,6 +209,18 @@ export function ReplyDrafts({
         ) : null}
       </div>
 
+      {steering && !busy ? (
+        <SteerPanel
+          kind='replies'
+          initial={state.steer ?? rememberedSteer('replies')}
+          title={t('feed.steer.title.replies')}
+          submitLabel={t('feed.steer.submit.replies')}
+          plainLabel={t('feed.steer.plain.replies')}
+          onSubmit={(steer) => void write(steer)}
+          onPlain={() => void write()}
+          onCancel={() => setSteering(false)}
+        />
+      ) : null}
       {pending ? (
         <p role='status' className='text-xs text-muted-foreground'>
           {t('feed.replies.writing')}
@@ -226,6 +251,9 @@ export function ReplyDrafts({
         </p>
       ) : null}
 
+      {drafts.length && !pending ? (
+        <SteerApplied kind='replies' steer={state.steer} />
+      ) : null}
       {drafts.length ? (
         <ol className='flex flex-col gap-2'>
           {drafts.map((draft, index) => (

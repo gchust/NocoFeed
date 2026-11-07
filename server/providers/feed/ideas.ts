@@ -12,6 +12,15 @@ import {
 } from './material.js';
 import type { FeedItemDetail, Profile } from './service.js';
 import { FeedError } from './service.js';
+import {
+  HUMAN_VOICE_IDEAS_RULE,
+  IDEA_ANGLES,
+  normalizeSteer,
+  type Steer,
+  type SteerInput,
+  steerBlock,
+  storedSteer,
+} from './steer.js';
 import { truncate } from './text.js';
 
 /**
@@ -129,6 +138,8 @@ export interface IdeaSet {
   webSearch: boolean;
   model: string | null;
   trigger: 'manual' | 'auto';
+  /** What the person asked for when these ideas were last written (issue #20); null when nothing. */
+  steer: Steer | null;
 }
 
 export interface IdeasState {
@@ -367,6 +378,8 @@ export function buildIdeasPrompt(input: {
   count?: number;
   /** Ideas already shown for a kind that the new ones must not repeat. */
   avoid?: readonly Idea[];
+  /** What the person asked for this round (issue #20); comes after the style and wins over it. */
+  steer?: Steer | null;
 }): { system: string; prompt: string } {
   const count = input.count ?? IDEAS_PER_KIND;
   const language = LANGUAGE_NAMES[input.language] ?? 'Simplified Chinese';
@@ -379,6 +392,12 @@ export function buildIdeasPrompt(input: {
     input.webSearch
       ? 'Search the web first for current events, discussions and memes related to the topic, and connect the ideas to what is happening now where it fits. Mention only what you found.'
       : 'You cannot search the web. Connect ideas to wider trends only from the MATERIAL and widely known facts; do not claim anything is trending now.',
+    HUMAN_VOICE_IDEAS_RULE,
+    ...(input.steer
+      ? [
+          "When THIS ROUND is present in the prompt, it is the person's request for this round and takes priority over the CREATOR STYLE; it never allows misleading, made-up or unfriendly content.",
+        ]
+      : []),
     `Unless a kind says otherwise, write in ${language}.`,
     'Plain text only: no Markdown, no HTML. Use line breaks for paragraphs.',
     'Answer with one JSON object only, no markdown fence.',
@@ -415,7 +434,7 @@ ${materialLines(input.item, {
 >>>
 
 ${related}${avoid}
-Return JSON with these keys, each an array:
+${steerBlock(input.steer ?? null)}Return JSON with these keys, each an array:
 ${input.kinds.map((kind) => `- ${KIND_BRIEFS[kind](count, xLanguage)}`).join('\n')}`;
   return { system, prompt };
 }
@@ -604,6 +623,7 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
       webSearch: Boolean(row.webSearch),
       model: (row.model as string | null) ?? null,
       trigger: row.trigger === 'auto' ? 'auto' : 'manual',
+      steer: storedSteer(row.steer, IDEA_ANGLES),
     };
   }
 
@@ -807,6 +827,7 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
       actor: OnlineAgentContext | null;
       trigger: 'manual' | 'auto';
       replace?: { index: number; ideas: Idea[] };
+      steer?: Steer | null;
     },
   ): Promise<void> {
     const agents = deps.agents();
@@ -854,6 +875,7 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
       webSearch: Boolean(options.actor && model.webSearch),
       count: options.replace ? 1 : IDEAS_PER_KIND,
       avoid: options.replace?.ideas,
+      steer: options.steer,
     });
     let parsed: Partial<Record<IdeaKind, Idea[]>> = {};
     let webSearch = false;
@@ -912,6 +934,10 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
           webSearch,
           generatedAt: at,
           updatedAt: at,
+          // A new set says what it was asked for; one more idea without a note leaves the set's note as it was.
+          ...(options.replace && !options.steer
+            ? {}
+            : { steer: options.steer ?? null }),
         },
       } as never);
     }
@@ -946,6 +972,8 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
     ownerId: string,
     itemId: number,
     kinds?: readonly IdeaKind[],
+    /** What the person asks for this round (issue #20); without it the ideas follow the style alone. */
+    input?: SteerInput | null,
   ): Promise<IdeasState> {
     await deps.getItem(ownerId, itemId);
     if (isBusy(ownerId, itemId)) throw new FeedError('busy', 'ideasBusy');
@@ -955,9 +983,10 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
     const chosen = kinds?.length
       ? IDEA_KINDS.filter((kind) => kinds.includes(kind))
       : settings.kinds;
+    const steer = normalizeSteer(input, IDEA_ANGLES);
     await markPending(ownerId, itemId, chosen, 'manual');
     startGeneration(ownerId, itemId, () =>
-      generate(ownerId, itemId, chosen, { actor, trigger: 'manual' }),
+      generate(ownerId, itemId, chosen, { actor, trigger: 'manual', steer }),
     );
     return state(ownerId, itemId);
   }
@@ -969,6 +998,7 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
     itemId: number,
     kind: IdeaKind,
     index: number,
+    input?: SteerInput | null,
   ): Promise<IdeasState> {
     await deps.getItem(ownerId, itemId);
     if (isBusy(ownerId, itemId)) throw new FeedError('busy', 'ideasBusy');
@@ -989,6 +1019,7 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
         actor,
         trigger: 'manual',
         replace: { index, ideas },
+        steer: normalizeSteer(input, IDEA_ANGLES),
       }),
     );
     return state(ownerId, itemId);

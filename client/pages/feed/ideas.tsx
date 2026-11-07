@@ -44,6 +44,8 @@ import {
   type XIdea,
   type XiaohongshuIdea,
 } from './ideas-model.js';
+import { SteerApplied, SteerPanel } from './steer.js';
+import { rememberedSteer, rememberSteer, type Steer } from './steer-model.js';
 
 const ERROR_CODES = new Set([
   'noModel',
@@ -221,11 +223,16 @@ function CopyButton({ text }: { readonly text: string }): ReactElement {
 function IdeaSetCard({
   set,
   busy,
+  steeringIndex,
+  onSteer,
   onAgain,
 }: {
   readonly set: IdeaSet;
   readonly busy: boolean;
-  readonly onAgain: (kind: IdeaKind, index: number) => void;
+  /** The idea whose "One more" panel is open, if any. */
+  readonly steeringIndex: number | null;
+  readonly onSteer: (index: number | null) => void;
+  readonly onAgain: (kind: IdeaKind, index: number, steer?: Steer) => void;
 }): ReactElement {
   const { t } = useTranslation();
   const pending = set.status === 'pending';
@@ -262,6 +269,9 @@ function IdeaSetCard({
         {pending && !set.ideas.length ? (
           <Skeleton className='h-24 w-full' />
         ) : null}
+        {set.ideas.length && !pending ? (
+          <SteerApplied kind='ideas' steer={set.steer} />
+        ) : null}
         {set.ideas.map((idea, index) => (
           <div
             // eslint-disable-next-line @eslint-react/no-array-index-key
@@ -277,12 +287,25 @@ function IdeaSetCard({
                 size='sm'
                 variant='ghost'
                 disabled={busy || pending}
-                onClick={() => onAgain(set.kind, index)}
+                aria-expanded={steeringIndex === index}
+                onClick={() => onSteer(steeringIndex === index ? null : index)}
               >
                 <RefreshCwIcon />
                 {t('feed.ideas.again')}
               </Button>
             </div>
+            {steeringIndex === index && !busy && !pending ? (
+              <SteerPanel
+                kind='ideas'
+                initial={set.steer ?? rememberedSteer('ideas')}
+                title={t('feed.steer.title.ideaAgain')}
+                submitLabel={t('feed.steer.submit.ideaAgain')}
+                plainLabel={t('feed.steer.plain.ideaAgain')}
+                onSubmit={(steer) => onAgain(set.kind, index, steer)}
+                onPlain={() => onAgain(set.kind, index)}
+                onCancel={() => onSteer(null)}
+              />
+            ) : null}
           </div>
         ))}
       </CardContent>
@@ -307,6 +330,10 @@ export function IdeasSection({
   const [failed, setFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  /** Which steer panel is open: "Regenerate" for all, or "One more" for one idea (issue #20). */
+  const [steering, setSteering] = useState<
+    { all: true } | { kind: IdeaKind; index: number } | null
+  >(null);
   const path = `feedItems/${encodeURIComponent(itemId)}/ideas`;
 
   const load = useCallback(
@@ -336,6 +363,7 @@ export function IdeasSection({
     request: () => Promise<{ data: IdeasState }>,
   ): Promise<void> => {
     setSending(true);
+    setSteering(null);
     try {
       setState((await request()).data);
     } catch (cause: unknown) {
@@ -349,16 +377,25 @@ export function IdeasSection({
     }
   };
 
-  const generate = () =>
+  const steerJson = (steer?: Steer) => {
+    if (!steer) return {};
+    rememberSteer('ideas', steer);
+    return { angles: steer.angles, note: steer.note };
+  };
+  const generate = (steer?: Steer) =>
     send(() =>
-      api.request<{ data: IdeasState }>({ path, method: 'POST', json: {} }),
+      api.request<{ data: IdeasState }>({
+        path,
+        method: 'POST',
+        json: steerJson(steer),
+      }),
     );
-  const again = (kind: IdeaKind, index: number) =>
+  const again = (kind: IdeaKind, index: number, steer?: Steer) =>
     send(() =>
       api.request<{ data: IdeasState }>({
         path: `${path}/again`,
         method: 'POST',
-        json: { kind, index },
+        json: { kind, index, ...steerJson(steer) },
       }),
     );
 
@@ -405,7 +442,12 @@ export function IdeasSection({
               size='sm'
               variant='outline'
               disabled={sending || pending || !state.available}
-              onClick={() => void generate()}
+              aria-expanded={Boolean(steering && 'all' in steering)}
+              onClick={() =>
+                setSteering((open) =>
+                  open && 'all' in open ? null : { all: true },
+                )
+              }
             >
               <RefreshCwIcon />
               {t('feed.ideas.regenerate')}
@@ -423,6 +465,21 @@ export function IdeasSection({
           </div>
         ) : null}
       </div>
+      {steering && 'all' in steering && !sending && !pending ? (
+        <SteerPanel
+          kind='ideas'
+          initial={
+            state.sets.find((set) => set.steer)?.steer ??
+            rememberedSteer('ideas')
+          }
+          title={t('feed.steer.title.ideas')}
+          submitLabel={t('feed.steer.submit.ideas')}
+          plainLabel={t('feed.steer.plain.ideas')}
+          onSubmit={(steer) => void generate(steer)}
+          onPlain={() => void generate()}
+          onCancel={() => setSteering(null)}
+        />
+      ) : null}
       {!state.available && !hasSets ? (
         <Alert>
           <AlertTitle>{t('feed.ideas.unavailable.title')}</AlertTitle>
@@ -480,7 +537,15 @@ export function IdeasSection({
               key={set.kind}
               set={set}
               busy={sending}
-              onAgain={(kind, index) => void again(kind, index)}
+              steeringIndex={
+                steering && 'kind' in steering && steering.kind === set.kind
+                  ? steering.index
+                  : null
+              }
+              onSteer={(index) =>
+                setSteering(index === null ? null : { kind: set.kind, index })
+              }
+              onAgain={(kind, index, steer) => void again(kind, index, steer)}
             />
           ))}
         </>
