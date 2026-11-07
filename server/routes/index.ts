@@ -6,6 +6,7 @@ import { feedIdeasRoutes } from './feed-ideas.js';
 import { feedIngestRoutes } from './feed-ingest.js';
 import { feedReplyRoutes } from './feed-replies.js';
 import { feedRoutes } from './feed.js';
+import { feedWritingSkillRoutes } from './feed-writing-skills.js';
 
 const routes: readonly AppRouteContribution<Application>[] = [
   feedRoutes,
@@ -13,6 +14,7 @@ const routes: readonly AppRouteContribution<Application>[] = [
   feedIdeasRoutes,
   feedIngestRoutes,
   feedReplyRoutes,
+  feedWritingSkillRoutes,
 ];
 
 export default routes;

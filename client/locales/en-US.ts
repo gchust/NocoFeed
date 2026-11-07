@@ -44,13 +44,18 @@ const enUS = {
     agents: 'Agents',
     runtimes: 'Runtimes',
     agentUsage: 'Agent usage',
+    skills: 'Skills',
     mailAccounts: 'Mail accounts',
   },
   // What the Agents plugin's pages call NocoFeed's subject and why its runs start (`agent-reader.ts`).
   agents: {
     subjects: { feedItem: 'Feed item' },
     triggers: { analyze: 'Analyse again', ask: 'Question about the item' },
-    pages: { runtimeConnect: 'Add runtime' },
+    pages: {
+      runtimeConnect: 'Add runtime',
+      skillNew: 'New skill',
+      skillDetail: 'Skill details',
+    },
   },
   app: { ...systemEnUS.app, title: 'NocoFeed' },
   feed: {
@@ -1238,6 +1243,29 @@ const enUS = {
       save: 'Save rules',
       saved: 'Reply rules saved',
       savedHint: 'Reply drafts written from now on follow them.',
+    },
+    // Writing skills (`writing-skills.tsx`): skills of the library used for reply drafts, ideas and briefs, by language.
+    writingSkills: {
+      title: 'Writing skills',
+      description:
+        'Pick a skill per language so that AI-written replies, ideas and briefs follow its way of writing, such as humanizer for English and Humanizer-zh for Chinese. A skill changes the wording only: never the facts, and never the "not misleading, not unfriendly" rules.',
+      uses: { replies: 'Reply drafts', ideas: 'Ideas', briefs: 'Briefs' },
+      usesHint: {
+        replies:
+          'Chosen by the language of the post. Changing a skill, or a new version of it, shows "rules changed" on existing drafts.',
+        ideas:
+          'Xiaohongshu and Bilibili count as Chinese, X as its post language, the rest as your reading language.',
+        briefs:
+          'Chosen by your reading language (by the item’s own language when you read originals). Applies to briefs written from now on.',
+      },
+      languages: { en: 'English', zh: 'Chinese', other: 'Other languages' },
+      none: 'None',
+      empty:
+        'The skill library has no skills yet. An administrator can create or import them under System settings → Skills (for example the SKILL.md of humanizer or Humanizer-zh).',
+      library: 'Skills are kept under System settings → Skills.',
+      save: 'Save',
+      saved: 'Writing skills saved',
+      savedHint: 'What is written from now on uses the chosen skills.',
     },
     agent: {
       none: 'None: use the AI model and the rules',

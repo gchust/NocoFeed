@@ -20,6 +20,7 @@ the person's topics and experience, and the person keeps their own marks and not
   see "Reply drafts" below).
   `202611250001_feed_ideas.ts` (`feedIdeas`, `feedIdeaSettings`: see "Ideas" below).
   `202611270101_feed_steer.ts` (`feedReplyDrafts.steer`, `feedIdeas.steer`: see "Steering a rewrite" below).
+  `202611290101_feed_writing_skills.ts` (`feedProfiles.writingSkills`: see "Writing skills" below).
   `202611260101_feed_admission.ts` (`feedAnalyses.heldVerdict`/`watchUntil`, `feedProfiles.waitForHeat`/`waitHours`:
   see "Admission of search results" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
@@ -186,6 +187,36 @@ ideas are still written at once, without the panel.
   defaults), the issue #20 cases in `feed-replies.test.ts` / `feed-ideas.test.ts` (prompt, stored steer, plain batch
   unchanged, `400`s), `tests/database/feed-steer-migration.test.ts`, and the panel cases in
   `tests/client/feed-replies.test.tsx` / `feed-ideas.test.tsx`.
+
+## Writing skills
+
+Skills (Agent Skills, `SKILL.md`) from the Agents plugin's skill library shape what the model writes for a person:
+`humanizer` for English replies, `humanizer-zh` for Chinese ones, and so on. Library: System settings → Skills (the
+plugin's `skillsRoute`, its own page grant; create, import a zip, versions). NocoFeed keeps only who uses which skill
+where: `server/providers/feed/writing-skills.ts` (service, `feedWritingSkillsToken`), `skills-prompt.ts` (pure:
+buckets, prompt block, versions; no service import so `brief.ts` can use it), `server/routes/feed-writing-skills.ts`,
+`client/pages/preferences/writing-skills.tsx` (the "Writing skills" card).
+
+- **Choice.** `feedProfiles.writingSkills` = `{ replies|ideas|briefs: { en|zh|other: skillId } }`, per person.
+  `GET|PUT /feedWritingSkills` (session; PUT replaces the whole choice, unknown ids `400`
+  `FEED_WRITING_SKILL_MISSING`). The GET lists every library skill's name and description to any signed-in person, so
+  they can pick one; contents and edits stay behind the plugin's permissions. A skill deleted from the library reads as
+  not chosen and is skipped when writing.
+- **Language of the text, not of the reader.** Replies: the post's (`replyLanguageOf`, the drafts' stored `language`
+  for the state). Ideas: per kind (`kindLanguageOf`: Xiaohongshu/Bilibili Chinese, X `xLanguage`, the rest the reading
+  language); one generation can carry two skills. Briefs: the reading language, or `scriptLanguageOf` the item when
+  reading originals. Tags fall in `en` / `zh` / `other` (`skillLanguageOf`). Full-text translation uses no skill.
+- **Prompt.** Single `gateway.generate` (or online agent) calls, so a skill is guidance, never run: the `SKILL.md` body
+  without front matter, at most `SKILL_PROMPT_CHARS`, fences stripped, goes at the end of the system prompt
+  (`skillsBlock`) as trusted text ranked below the safety rules, the material's facts, the language rules and the
+  answer format, and told to ignore what assumes another setting (asking, tools, drafts, before/after). Files beside
+  `SKILL.md` are not read. Without a chosen skill every prompt is byte-for-byte as before.
+- **Versions.** The skill's `name@version` joins `guidelinesVersion` (replies, `<hash>-<skill hash>`) and the per-kind
+  `styleVersion` of ideas (`kindVersionOf`), so choosing another skill or saving a new version shows "rules changed" /
+  stale; without skills both are unchanged. Briefs keep no version: new briefs use the current skill.
+- Tests: `tests/server/feed-writing-skills.test.ts` (block, buckets, prompts unchanged without skills, versions, routes
+  with the real skill library, a reply generation with the chosen skill), `tests/database/feed-writing-skills-migration.test.ts`,
+  `tests/client/feed-writing-skills.test.tsx`.
 
 ## Topics and subscriptions
 

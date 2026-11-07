@@ -1,5 +1,6 @@
 import type { AnalysisItem } from './analyzer.js';
 import { truncate } from './text.js';
+import { skillsBlock, type SkillsForPrompt } from './skills-prompt.js';
 
 /**
  * Briefs and translations: what the model writes so that the person can take in an item at a glance, in the language
@@ -69,6 +70,8 @@ const SAFETY = [
 export function buildBriefPrompt(
   item: AnalysisItem,
   language: ReadingLanguage,
+  /** The writing skills the person chose for briefs in this language; they shape the wording, never the facts. */
+  skills?: SkillsForPrompt,
 ): { system: string; prompt: string } {
   const images = (item.media ?? [])
     .slice(0, MAX_MEDIA)
@@ -90,6 +93,13 @@ export function buildBriefPrompt(
       ? 'You cannot see the images. Place one only where the text clearly depends on it (a chart, a screenshot, a product photo the post is about), as ![short caption](media:N) on its own line; at most 2. Usually place none.'
       : 'The post has no images to place.',
     'Answer with one JSON object only, no markdown fence.',
+    ...(skills?.skills.length
+      ? [
+          '',
+          'The WRITING SKILLS below shape how the brief and the title read; they never drop a fact, number or attribution the brief would otherwise carry, and the structure above (one sentence, then bullets) stays.',
+          skillsBlock(skills),
+        ]
+      : []),
   ].join('\n');
   const prompt = `MATERIAL (platform: ${item.platform})
 <<<

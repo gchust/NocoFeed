@@ -80,7 +80,8 @@ import {
   type TimeGate,
 } from './admission.js';
 import { coverOf } from './media.js';
-import { mapLimit, truncate } from './text.js';
+import type { SkillsForPrompt } from './skills-prompt.js';
+import { mapLimit, scriptLanguageOf, truncate } from './text.js';
 import { createHash } from 'node:crypto';
 import type {
   CollectResult,
@@ -751,6 +752,14 @@ export interface FeedServiceDeps {
    * Without it (tests that build the service alone) the service always runs it detached.
    */
   deferRescore?: (task: RescoreTask) => Promise<void>;
+  /**
+   * The writing skills a person chose for briefs in the given languages (`writing-skills.ts`). Without it, or when none
+   * is chosen, briefs are written as before.
+   */
+  skills?: (
+    ownerId: string,
+    languages: readonly (string | null)[],
+  ) => Promise<SkillsForPrompt>;
 }
 
 /** What a background re-score needs: whose analyses, and the words whose weight changed. */
@@ -3514,7 +3523,20 @@ export function createFeedService(deps: FeedServiceDeps) {
     if (!ref) return false;
     const language = readingLanguageOf(profile.readingLanguage, profile.locale);
     const item = toAnalysisItem(row);
-    const { system, prompt } = buildBriefPrompt(item, language);
+    let skills: SkillsForPrompt | undefined;
+    if (deps.skills)
+      try {
+        skills = await deps.skills(ownerId, [
+          language === 'original'
+            ? scriptLanguageOf(
+                `${item.title}\n${(item.body ?? item.summary ?? '').slice(0, 2_000)}`,
+              )
+            : language,
+        ]);
+      } catch {
+        skills = undefined;
+      }
+    const { system, prompt } = buildBriefPrompt(item, language, skills);
     const ask = async () =>
       (
         await deps.agents()!.models.gateway.generate({

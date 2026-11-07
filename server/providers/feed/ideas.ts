@@ -22,6 +22,13 @@ import {
   storedSteer,
 } from './steer.js';
 import { truncate } from './text.js';
+import {
+  NO_SKILLS,
+  skillLanguageOf,
+  skillsBlock,
+  type SkillsForPrompt,
+  skillsVersion,
+} from './skills-prompt.js';
 
 /**
  * Ideas (issue #16): what a person could make from an item — a Xiaohongshu note, an X post or thread, a short-video
@@ -163,6 +170,33 @@ type Row = Record<string, unknown>;
 
 export function styleVersionOf(style: string): string {
   return createHash('sha256').update(style.trim()).digest('hex').slice(0, 12);
+}
+
+/** The language one kind is written in: Xiaohongshu and Bilibili Chinese, X its own setting, the rest `language`. */
+export function kindLanguageOf(
+  kind: IdeaKind,
+  language: string,
+  xLanguage: string,
+): string {
+  if (kind === 'xiaohongshu' || kind === 'bilibili') return 'zh-CN';
+  if (kind === 'x') return xLanguage;
+  return language;
+}
+
+/**
+ * The version a kind's ideas are written under: the style's, and with a writing skill for the kind's language, that
+ * skill's name and version too, so changing either marks the ideas stale. Without skills it is the style's alone.
+ */
+export function kindVersionOf(
+  styleVersion: string,
+  skills: SkillsForPrompt,
+  kindLanguage: string,
+): string {
+  const bucket = skillLanguageOf(kindLanguage);
+  const skill = skills.skills.find((entry) => entry.languages.includes(bucket));
+  return skill
+    ? `${styleVersion}-${skillsVersion(`${skill.name}@${skill.version}`)}`
+    : styleVersion;
 }
 
 const parseJson = <T>(value: unknown, fallback: T): T => {
@@ -380,6 +414,8 @@ export function buildIdeasPrompt(input: {
   avoid?: readonly Idea[];
   /** What the person asked for this round (issue #20); comes after the style and wins over it. */
   steer?: Steer | null;
+  /** The writing skills the person chose for ideas in the languages these kinds are written in. */
+  skills?: SkillsForPrompt;
 }): { system: string; prompt: string } {
   const count = input.count ?? IDEAS_PER_KIND;
   const language = LANGUAGE_NAMES[input.language] ?? 'Simplified Chinese';
@@ -401,6 +437,7 @@ export function buildIdeasPrompt(input: {
     `Unless a kind says otherwise, write in ${language}.`,
     'Plain text only: no Markdown, no HTML. Use line breaks for paragraphs.',
     'Answer with one JSON object only, no markdown fence.',
+    ...(input.skills?.skills.length ? ['', skillsBlock(input.skills)] : []),
   ].join('\n');
   const related = input.related.length
     ? `
@@ -494,6 +531,11 @@ export interface FeedIdeasDeps {
    * never throws (`ask.ts` `prepare`). Without it the ideas are written from what is stored.
    */
   prepare?: PrepareMaterial;
+  /** The writing skills a person chose for ideas in the given languages (`writing-skills.ts`). */
+  skills?: (
+    ownerId: string,
+    languages: readonly (string | null)[],
+  ) => Promise<SkillsForPrompt>;
   log: (
     level: 'info' | 'warn' | 'error',
     message: string,
@@ -605,9 +647,29 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
     }
   }
 
+  /** The language ideas are written in unless a kind says otherwise: the reading language, else the interface's. */
+  function contentLanguageOf(profile: Profile): string {
+    const reading = readingLanguageOf(profile.readingLanguage, profile.locale);
+    if (reading !== 'original') return reading;
+    return profile.locale === 'en-US' ? 'en' : 'zh-CN';
+  }
+
+  async function skillsOf(
+    ownerId: string,
+    languages: readonly string[],
+  ): Promise<SkillsForPrompt> {
+    if (!deps.skills) return NO_SKILLS;
+    try {
+      return await deps.skills(ownerId, languages);
+    } catch {
+      return NO_SKILLS;
+    }
+  }
+
   // State
 
-  function toSet(row: Row, styleVersion: string): IdeaSet {
+  function toSet(row: Row, current: (kind: IdeaKind) => string): IdeaSet {
+    const styleVersion = current(row.kind as IdeaKind);
     const started = new Date(row.updatedAt as string).getTime();
     const lost =
       row.status === 'pending' &&
@@ -636,13 +698,29 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
 
   async function state(ownerId: string, itemId: number): Promise<IdeasState> {
     await deps.getItem(ownerId, itemId);
-    const [settings, model, rows] = await Promise.all([
+    const [settings, model, rows, profile] = await Promise.all([
       getSettings(ownerId),
       modelOf(deps.agents()),
       rowsOf(ownerId, itemId),
+      deps.getProfile(ownerId),
     ]);
+    const language = contentLanguageOf(profile);
+    const skills = rows.length
+      ? await skillsOf(
+          ownerId,
+          IDEA_KINDS.map((kind) =>
+            kindLanguageOf(kind, language, settings.xLanguage),
+          ),
+        )
+      : NO_SKILLS;
+    const current = (kind: IdeaKind) =>
+      kindVersionOf(
+        settings.styleVersion,
+        skills,
+        kindLanguageOf(kind, language, settings.xLanguage),
+      );
     const sets = rows
-      .map((row) => toSet(row, settings.styleVersion))
+      .map((row) => toSet(row, current))
       .sort((a, b) => IDEA_KINDS.indexOf(a.kind) - IDEA_KINDS.indexOf(b.kind));
     return {
       available: Boolean(model),
@@ -858,17 +936,17 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
       else await fail(ownerId, itemId, kinds, 'thinMaterial');
       return;
     }
-    const reading = readingLanguageOf(profile.readingLanguage, profile.locale);
+    const language = contentLanguageOf(profile);
+    const skills = await skillsOf(
+      ownerId,
+      kinds.map((kind) => kindLanguageOf(kind, language, settings.xLanguage)),
+    );
     const { system, prompt } = buildIdeasPrompt({
       item,
       kinds,
       style: settings.style,
-      language:
-        reading === 'original'
-          ? profile.locale === 'en-US'
-            ? 'en'
-            : 'zh-CN'
-          : reading,
+      language,
+      skills,
       pageText,
       xLanguage: settings.xLanguage,
       related,
@@ -929,7 +1007,11 @@ export function createFeedIdeas(deps: FeedIdeasDeps) {
           status: 'ready',
           error: null,
           ideas,
-          styleVersion: settings.styleVersion,
+          styleVersion: kindVersionOf(
+            settings.styleVersion,
+            skills,
+            kindLanguageOf(kind, language, settings.xLanguage),
+          ),
           model: `${model.ref.modelService}/${model.ref.model}`,
           webSearch,
           generatedAt: at,

@@ -61,6 +61,7 @@ import {
   type Profile,
 } from '../feed/types.js';
 import { ReplyGuidelinesCard } from './reply-guidelines.js';
+import { WritingSkillsCard } from './writing-skills.js';
 
 const FORM_ID = 'feed-preferences-form';
 
@@ -118,6 +119,7 @@ export default function PreferencesPage(): ReactElement {
         <LearnedWeights profile={result.profile} onCleared={reload} />
       ) : null}
       {result?.profile ? <IdeaSettingsCard key={reloadCount} /> : null}
+      {result?.profile ? <WritingSkillsCard key={reloadCount} /> : null}
     </PageContainer>
   );
 }
