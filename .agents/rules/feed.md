@@ -410,6 +410,14 @@ on; never an image). Two per kind.
   `tool: []`, JSON Schema `ideasSchema`) writes them and is deleted afterwards; if that fails, or search is not
   supported, `models.gateway.generate` writes them from the item alone and the card says so. Manual generation does
   not count against `dailyLimit`.
+- **Material first, and only what was read** (issue #17). Before writing, `generate` runs `deps.prepare` — the same
+  `prepare` as "Ask about this item" (`ask.ts`, wired in `index.ts`): fetches the parts the item lacks, at most
+  `ASK_PREPARE_MS`, never fails the ideas, and reads the linked page of a link-only item. The prompt's MATERIAL comes
+  from `materialLines` (`material.ts`): a line only for what is there (no "(not obtained)", no MATERIAL STATUS), and
+  `NO_META_RULE` forbids talking about fetching, missing text or comments, or "only a title". An item with nothing but
+  its title even then (`hasSubstance`: no body, page, own summary, subtitles or comments; a brief or analysis does not
+  count) is not sent to the model: the kinds fail with `thinMaterial` and the card says there is not enough content
+  yet. Reply drafts (`replies.ts`) use the same `prepare`, `materialLines` and rule, but are still written from a title.
 - **Automatic.** With `auto` on, the `collect-due-sources` tick runs `ideasPending`: `discuss` items collected in the
   last two days, not dismissed, without ideas, best first, `IDEAS_PER_TICK` per tick and at most
   `min(10, dailyLimit)` items a day per person; gateway only (no person to act as, so no web search).

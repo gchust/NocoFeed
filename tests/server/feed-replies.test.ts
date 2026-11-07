@@ -128,6 +128,26 @@ describe('reply prompt and answer', () => {
     expect(DEFAULT_REPLY_GUIDELINES['en-US']).toContain('Never misleading');
   });
 
+  it('leaves out what was not read, and forbids talking about it (issue #17)', () => {
+    const { system, prompt } = buildReplyPrompt(
+      detail({ body: null, comments: [], analysis: null }),
+      { interests: '', expertise: '', locale: 'zh-CN' },
+      'Be kind.',
+    );
+    for (const text of ['not obtained', 'not analysed', 'Body:', 'Comments:'])
+      expect(prompt).not.toContain(text);
+    expect(prompt).toContain('Title: Postgres backups restored in minutes');
+    expect(system).toContain('Never mention how the material was obtained');
+    const page = buildReplyPrompt(
+      detail({ body: null }),
+      { interests: '', expertise: '', locale: 'zh-CN' },
+      'Be kind.',
+      'The linked article on WAL archiving.',
+    );
+    expect(page.prompt).toContain('Body: The linked article on WAL archiving.');
+    expect(page.prompt).toContain('- a: What about WAL archiving?');
+  });
+
   it('needs at least three replies, and keeps no markup', () => {
     expect(() => parseReplyAnswer(drafts(2))).toThrow();
     expect(() => parseReplyAnswer('no json')).toThrow();
@@ -277,11 +297,19 @@ async function setUp(
     notify: async () => true,
     log: () => undefined,
   });
+  // Stands in for "Ask about this item"'s `prepare`: the comments arrive before the drafts are written.
+  const prepare = vi.fn(async (_ownerId: string, item: FeedItemDetail) => ({
+    item: {
+      ...item,
+      comments: [{ author: 'dba', text: 'Fetched just now: what about PITR?' }],
+    },
+  }));
   const replies = createFeedReplies({
     database,
     agents,
     getItem: (ownerId, id) => service.getItem(ownerId, id),
     getProfile: (ownerId) => service.getProfile(ownerId),
+    prepare,
     log: () => undefined,
   });
   const ownerId = admin.user.id;
@@ -326,7 +354,16 @@ async function setUp(
     .deleteFrom('feedReplyDrafts')
     .where('ownerId', '=', ownerId)
     .execute();
-  return { service, replies, ownerId, generate, idOf, admin, database };
+  return {
+    service,
+    replies,
+    ownerId,
+    generate,
+    idOf,
+    admin,
+    database,
+    prepare,
+  };
 }
 
 const replyCalls = (generate: ReturnType<typeof vi.fn>) =>
@@ -337,7 +374,8 @@ const replyCalls = (generate: ReturnType<typeof vi.fn>) =>
 test('writes drafts for discussions only, in the post’s language, once', async ({
   testApp,
 }) => {
-  const { service, replies, ownerId, generate, idOf } = await setUp(testApp);
+  const { service, replies, ownerId, generate, idOf, prepare } =
+    await setUp(testApp);
   expect(
     (await service.getItem(ownerId, idOf('discuss'))).analysis?.verdict,
   ).toBe('discuss');
@@ -358,6 +396,14 @@ test('writes drafts for discussions only, in the post’s language, once', async
     false,
   );
   expect(calls[0]!.prompt).toContain(DEFAULT_REPLY_GUIDELINES['zh-CN']);
+  // What the item lacked was fetched first and is written from (issue #17).
+  expect(prepare).toHaveBeenCalledWith(
+    ownerId,
+    expect.objectContaining({ id: idOf('discuss') }),
+  );
+  expect(calls[0]!.prompt).toContain(
+    '- dba: Fetched just now: what about PITR?',
+  );
 
   const state = await replies.state(ownerId, idOf('discuss'));
   expect(state).toMatchObject({

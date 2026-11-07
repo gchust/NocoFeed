@@ -128,7 +128,10 @@ Fetches more material for one stored item when the person asks for it.
 
 `want` lists any of `body`, `comments`, `transcript` and `published`. `published` asks for the exact publication time
 of an item whose list gave none or an approximate one; the answer carries it as `item.publishedAt` (an exact ISO instant,
-no `publishedAtApproximate`) and replaces nothing else. NocoFeed asks for it only for YouTube, a few videos per
+no `publishedAtApproximate`) and replaces nothing else. When the page gives only the day (YouTube asking a server to
+sign in shows the upload date but not the time), send noon UTC of that day with `"publishedAtApproximate": true`;
+NocoFeed keeps the time approximate, takes the day only where it says more than the time it has, and asks again a day
+later. For YouTube, `body` is the video's description (a search result has only its title). NocoFeed asks for it only for YouTube, a few videos per
 scheduled tick (`resolvePublishedTimes`), and leaves a Collector that answers `400` to it alone for six hours.
 
 Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "media": […], "coverage": {…} } }`
