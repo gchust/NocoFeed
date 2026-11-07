@@ -50,10 +50,12 @@ const ready: ReplyState = {
   available: true,
   model: 's/m',
   updatedAt: '2026-11-06T00:00:00Z',
+  steer: null,
 };
 
 let replyState: ReplyState;
 let polls = 0;
+let asked: { angles?: string[]; note?: string } | undefined;
 let guidelines: ReplyGuidelines;
 
 const api = vi.fn((call: ApiCall) => {
@@ -65,6 +67,10 @@ const api = vi.fn((call: ApiCall) => {
       replyState = {
         ...ready,
         trigger: 'asked',
+        steer:
+          asked?.angles?.length || asked?.note
+            ? { angles: asked.angles ?? [], note: asked.note ?? '' }
+            : null,
         drafts: [
           { text: 'Fresh one', tone: '', emoji: '', image: '' },
           ...ready.drafts.slice(1),
@@ -74,6 +80,7 @@ const api = vi.fn((call: ApiCall) => {
   }
   if (method === 'POST' && path === 'feedItems/7/replies') {
     replyState = { ...replyState, status: 'pending' };
+    asked = json as typeof asked;
     polls = 0;
     return new Response(JSON.stringify({ data: replyState }), {
       status: 202,
@@ -136,6 +143,8 @@ describe('reply drafts', () => {
     api.mockClear();
     replyState = ready;
     polls = 0;
+    asked = undefined;
+    localStorage.clear();
   });
 
   it('lists the drafts in the post’s language with their emoji and picture ideas', async () => {
@@ -210,12 +219,17 @@ describe('reply drafts', () => {
     await user.click(
       await screen.findByRole('button', { name: enUS.feed.replies.again }),
     );
-    expect(
-      api.mock.calls.some(
-        ([call]) =>
-          call.method === 'POST' && call.path === 'feedItems/7/replies',
-      ),
-    ).toBe(true);
+    // "New batch" asks first; "Just a new batch" writes as before, with nothing to steer it.
+    await user.click(
+      await screen.findByRole('button', {
+        name: enUS.feed.steer.plain.replies,
+      }),
+    );
+    const posts = api.mock.calls.filter(
+      ([call]) => call.method === 'POST' && call.path === 'feedItems/7/replies',
+    );
+    expect(posts).toHaveLength(1);
+    expect(posts[0]![0].json).toEqual({});
     // The earlier drafts stay while the new ones are written.
     expect(await screen.findByText(enUS.feed.replies.writing)).toBeVisible();
     expect(screen.getByText('How big was the database?')).toBeVisible();
@@ -223,6 +237,124 @@ describe('reply drafts', () => {
       timeout: 6_000,
     });
     expect(screen.queryByText(enUS.feed.replies.writing)).toBeNull();
+  });
+
+  it('steers a new batch with directions and a note, remembers them and says it followed them (issue #20)', async () => {
+    const user = setup();
+    await render(
+      <ReplyDrafts
+        itemId={7}
+        worthJoining
+        participated
+        onMarkJoined={() => undefined}
+      />,
+    );
+    const again = await screen.findByRole('button', {
+      name: enUS.feed.replies.again,
+    });
+    await user.click(again);
+    const panel = await screen.findByTestId('feed-steer-replies');
+    expect(again).toHaveAttribute('aria-expanded', 'true');
+    // Every direction of the issue is offered; nothing is picked yet, so "with these notes" waits for one.
+    for (const label of Object.values(enUS.feed.steer.angles.replies))
+      expect(
+        within(panel).getByRole('button', { name: label }),
+      ).toHaveAttribute('aria-pressed', 'false');
+    const submit = within(panel).getByRole('button', {
+      name: enUS.feed.steer.submit.replies,
+    });
+    expect(submit).toBeDisabled();
+    await user.click(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.replies.humor,
+      }),
+    );
+    await user.click(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.replies.askDetail,
+      }),
+    );
+    expect(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.replies.humor,
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    const note = within(panel).getByRole('textbox', {
+      name: enUS.feed.steer.noteLabel,
+    });
+    expect(note).toHaveAttribute('maxLength', '500');
+    await user.type(note, 'less polite');
+    await user.click(submit);
+
+    const post = api.mock.calls.find(
+      ([call]) => call.method === 'POST' && call.path === 'feedItems/7/replies',
+    );
+    expect(post![0].json).toEqual({
+      angles: ['askDetail', 'humor'],
+      note: 'less polite',
+    });
+    expect(screen.queryByTestId('feed-steer-replies')).toBeNull();
+    await waitFor(() => expect(screen.getByText('Fresh one')).toBeVisible(), {
+      timeout: 6_000,
+    });
+    expect(
+      screen.getByText(
+        'Following your notes: Ask about details, Funny / memes · less polite',
+      ),
+    ).toBeVisible();
+
+    // Opening the panel again starts from what was used, ready to adjust.
+    await user.click(
+      screen.getByRole('button', { name: enUS.feed.replies.again }),
+    );
+    const reopened = await screen.findByTestId('feed-steer-replies');
+    expect(
+      within(reopened).getByRole('textbox', {
+        name: enUS.feed.steer.noteLabel,
+      }),
+    ).toHaveValue('less polite');
+    expect(
+      within(reopened).getByRole('button', {
+        name: enUS.feed.steer.angles.replies.askDetail,
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await user.click(
+      within(reopened).getByRole('button', { name: enUS.feed.steer.cancel }),
+    );
+    expect(screen.queryByTestId('feed-steer-replies')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('nocofeed.steer.replies')!)).toEqual(
+      { angles: ['askDetail', 'humor'], note: 'less polite' },
+    );
+  });
+
+  it('prefills the panel from the note last used on another item', async () => {
+    localStorage.setItem(
+      'nocofeed.steer.replies',
+      JSON.stringify({ angles: ['pushBack'], note: 'as an indie developer' }),
+    );
+    const user = setup();
+    await render(
+      <ReplyDrafts
+        itemId={7}
+        worthJoining
+        participated
+        onMarkJoined={() => undefined}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: enUS.feed.replies.again }),
+    );
+    const panel = await screen.findByTestId('feed-steer-replies');
+    expect(
+      within(panel).getByRole('textbox', { name: enUS.feed.steer.noteLabel }),
+    ).toHaveValue('as an indie developer');
+    expect(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.replies.pushBack,
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    // No note on these drafts, so the card does not claim one.
+    expect(screen.queryByTestId('feed-steer-applied-replies')).toBeNull();
   });
 
   it('offers drafts on demand for other items, and says when the rules changed', async () => {
@@ -325,5 +457,19 @@ describe('reply copy', () => {
     expect(Object.keys(zhCN.preferences.replies).sort()).toEqual(
       Object.keys(enUS.preferences.replies).sort(),
     );
+  });
+
+  it('has every steer string in both languages (issue #20)', () => {
+    const paths = (value: unknown, prefix = ''): string[] =>
+      typeof value === 'object' && value !== null
+        ? Object.entries(value).flatMap(([key, child]) =>
+            paths(child, `${prefix}${key}.`),
+          )
+        : [prefix];
+    expect(paths(zhCN.feed.steer).sort()).toEqual(
+      paths(enUS.feed.steer).sort(),
+    );
+    expect(zhCN.feed.steer.angles.replies.pushBack).toBe('反驳/唱反调');
+    expect(zhCN.feed.steer.plain.replies).toBe('直接换一批');
   });
 });

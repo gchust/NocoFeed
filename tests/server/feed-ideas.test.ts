@@ -591,6 +591,45 @@ test('generates in the background, replaces one idea, and deletes', async ({
     ).status,
   ).toBe(404);
 
+  // "One more" with a note (issue #20): it reaches the model, and the set says it followed it.
+  const steered = await admin.fetch(
+    `/feedItems/${itemId}/ideas/again`,
+    json('POST', {
+      kind: 'xiaohongshu',
+      index: 0,
+      angles: ['shorter'],
+      note: '面向学生党',
+    }),
+  );
+  expect(steered.status).toBe(202);
+  await ideas.settled();
+  expect(prompts.at(-1)).toContain('面向学生党');
+  expect(prompts.at(-1)).toContain('THIS ROUND');
+  expect((await ideas.state(admin.user.id, itemId)).sets[0]!.steer).toEqual({
+    angles: ['shorter'],
+    note: '面向学生党',
+  });
+  for (const body of [
+    { kind: 'xiaohongshu', index: 0, note: '长'.repeat(501) },
+    { kind: 'xiaohongshu', index: 0, angles: ['askDetail'] },
+  ])
+    expect(
+      (
+        await admin.fetch(
+          `/feedItems/${itemId}/ideas/again`,
+          json('POST', body),
+        )
+      ).status,
+    ).toBe(400);
+  expect(
+    (
+      await admin.fetch(
+        `/feedItems/${itemId}/ideas`,
+        json('POST', { angles: ['nope'] }),
+      )
+    ).status,
+  ).toBe(400);
+
   // A new style marks the ideas stale.
   await admin.fetch(
     '/feedIdeaSettings',
@@ -761,8 +800,10 @@ describe('which way to the model', () => {
       database: {
         query: () => empty,
         repository: (name: string) => ({
-          findOne: async () =>
-            name === 'feedIdeaSettings' ? { style: '人设' } : null,
+          findOne: async ({ filter }: { filter: Record<string, unknown> }) =>
+            name === 'feedIdeaSettings'
+              ? { style: '人设' }
+              : (rows.get(key(filter)) ?? null),
           findMany: async ({ filter }: { filter: Record<string, unknown> }) =>
             [...rows.values()].filter((row) => row.itemId === filter.itemId),
           upsertOne: async ({
@@ -917,6 +958,61 @@ describe('which way to the model', () => {
     expect(request.prompt).toContain('- 读者: 标题决定了一半的点击率');
     expect(request.prompt).not.toContain('not obtained');
     expect(fake.rows.get('1:xiaohongshu')).toMatchObject({ status: 'ready' });
+  });
+
+  it('carries the person’s note into regenerating and one more idea (issue #20)', async () => {
+    const fake = setUpFake({ webSearch: false });
+    await fake.ideas.request(fake.actor, 'u1', 1, ['meme'], {
+      angles: ['funnier', 'bogus'],
+      note: '更接地气 <i>一点</i>',
+    });
+    await fake.ideas.settled();
+    const first = fake.generate.mock.calls.at(-1) as unknown as [
+      { system: string; prompt: string },
+    ];
+    expect(first[0].prompt).toContain('THIS ROUND');
+    expect(first[0].prompt).toContain('更接地气 一点');
+    expect(first[0].prompt).toContain('funnier');
+    expect(first[0].system).toContain('Write like a real creator');
+    expect(fake.rows.get('1:meme')).toMatchObject({
+      status: 'ready',
+      steer: { angles: ['funnier'], note: '更接地气 一点' },
+    });
+    expect(
+      (await fake.ideas.state('u1', 1)).sets.find((set) => set.kind === 'meme')
+        ?.steer,
+    ).toEqual({ angles: ['funnier'], note: '更接地气 一点' });
+
+    // "One more" with its own note.
+    await fake.ideas.again(fake.actor, 'u1', 1, 'meme', 0, {
+      angles: ['newPersona'],
+      note: '换成产品经理的口吻',
+    });
+    await fake.ideas.settled();
+    const again = fake.generate.mock.calls.at(-1) as unknown as [
+      { prompt: string },
+    ];
+    expect(again[0].prompt).toContain('换成产品经理的口吻');
+    expect(again[0].prompt).toContain('different persona');
+    expect(again[0].prompt).toContain('Already suggested');
+    expect(fake.rows.get('1:meme')).toMatchObject({
+      steer: { angles: ['newPersona'], note: '换成产品经理的口吻' },
+    });
+
+    // "Just one more" keeps the set's note; "Just regenerate" clears it.
+    await fake.ideas.again(fake.actor, 'u1', 1, 'meme', 0);
+    await fake.ideas.settled();
+    const plainAgain = fake.generate.mock.calls.at(-1) as unknown as [
+      { prompt: string },
+    ];
+    expect(plainAgain[0].prompt).not.toContain('THIS ROUND');
+    expect(fake.rows.get('1:meme')?.steer).toEqual({
+      angles: ['newPersona'],
+      note: '换成产品经理的口吻',
+    });
+    await fake.ideas.request(fake.actor, 'u1', 1, ['meme']);
+    await fake.ideas.settled();
+    expect(fake.rows.get('1:meme')?.steer).toBe(null);
   });
 
   it('does not generate from a bare title, even when fetching fails', async () => {

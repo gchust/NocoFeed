@@ -45,6 +45,7 @@ const set = (overrides: Partial<IdeaSet>): IdeaSet => ({
   webSearch: false,
   model: 's/m',
   trigger: 'manual',
+  steer: null,
   ...overrides,
 });
 
@@ -160,6 +161,7 @@ describe('ideas on an item', () => {
     polls = 0;
     calls.length = 0;
     api.mockClear();
+    localStorage.clear();
   });
 
   it('points to the model settings when nothing can write ideas', async () => {
@@ -212,9 +214,112 @@ describe('ideas on an item', () => {
     await user.click(
       within(second!).getByRole('button', { name: ideas.again }),
     );
+    // "One more" asks first; "Just one more" sends the same request as before.
+    await user.click(
+      await within(second!).findByRole('button', {
+        name: enUS.feed.steer.plain.ideaAgain,
+      }),
+    );
     const again = calls.find((call) => call.path === 'feedItems/7/ideas/again');
     expect(again?.json).toEqual({ kind: 'x', index: 1 });
     expect(await within(card).findByText(ideas.generating)).toBeVisible();
+  });
+
+  it('asks for one more idea with a note and directions, and prefills them next time (issue #20)', async () => {
+    ideasState = ready;
+    const user = userEvent.setup();
+    await render(<IdeasSection itemId={7} />);
+    const card = await screen.findByTestId('feed-ideas-x');
+    const [, second] = within(card).getAllByTestId('feed-idea');
+    await user.click(
+      within(second!).getByRole('button', { name: ideas.again }),
+    );
+    const panel = await within(second!).findByTestId('feed-steer-ideas');
+    for (const label of Object.values(enUS.feed.steer.angles.ideas))
+      expect(within(panel).getByRole('button', { name: label })).toBeVisible();
+    await user.click(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.ideas.controversial,
+      }),
+    );
+    await user.type(
+      within(panel).getByRole('textbox', { name: enUS.feed.steer.noteLabel }),
+      'aimed at students',
+    );
+    await user.click(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.submit.ideaAgain,
+      }),
+    );
+    const again = calls.find((call) => call.path === 'feedItems/7/ideas/again');
+    expect(again?.json).toEqual({
+      kind: 'x',
+      index: 1,
+      angles: ['controversial'],
+      note: 'aimed at students',
+    });
+    expect(screen.queryByTestId('feed-steer-ideas')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('nocofeed.steer.ideas')!)).toEqual({
+      angles: ['controversial'],
+      note: 'aimed at students',
+    });
+  });
+
+  it('regenerates with a note from the panel, prefilled from the set, and says it followed it', async () => {
+    ideasState = {
+      ...ready,
+      sets: ready.sets.map((entry) => ({
+        ...entry,
+        steer: { angles: ['shorter'], note: 'more relatable' },
+      })),
+    };
+    const user = userEvent.setup();
+    await render(<IdeasSection itemId={7} />);
+    const card = await screen.findByTestId('feed-ideas-x');
+    expect(
+      within(card).getByText('Following your notes: Shorter · more relatable'),
+    ).toBeVisible();
+    const regenerate = screen.getByRole('button', { name: ideas.regenerate });
+    await user.click(regenerate);
+    expect(regenerate).toHaveAttribute('aria-expanded', 'true');
+    const panel = await screen.findByTestId('feed-steer-ideas');
+    const note = within(panel).getByRole('textbox', {
+      name: enUS.feed.steer.noteLabel,
+    });
+    expect(note).toHaveValue('more relatable');
+    expect(
+      within(panel).getByRole('button', {
+        name: enUS.feed.steer.angles.ideas.shorter,
+      }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await user.type(note, ', no jargon');
+    await user.click(
+      within(panel).getByRole('button', { name: enUS.feed.steer.submit.ideas }),
+    );
+    const post = calls.find(
+      (call) => call.method === 'POST' && call.path === 'feedItems/7/ideas',
+    );
+    expect(post?.json).toEqual({
+      angles: ['shorter'],
+      note: 'more relatable, no jargon',
+    });
+  });
+
+  it('regenerates without a note as before', async () => {
+    ideasState = ready;
+    const user = userEvent.setup();
+    await render(<IdeasSection itemId={7} />);
+    await user.click(
+      await screen.findByRole('button', { name: ideas.regenerate }),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: enUS.feed.steer.plain.ideas }),
+    );
+    const post = calls.find(
+      (call) => call.method === 'POST' && call.path === 'feedItems/7/ideas',
+    );
+    expect(post?.json).toEqual({});
+    expect(screen.queryByTestId('feed-steer-ideas')).toBeNull();
   });
 
   it('says when the style changed and when the model searched the web', async () => {

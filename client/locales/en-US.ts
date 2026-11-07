@@ -430,6 +430,54 @@ const enUS = {
         "Drafts use the language and style of the post's own site and follow your reply rules.",
       editRules: 'Edit reply rules',
     },
+    // Steering a rewrite (`steer.tsx`, `server/providers/feed/steer.ts`, issue #20).
+    steer: {
+      title: {
+        replies: 'What should this batch do differently?',
+        ideas: 'What should the new ideas do differently?',
+        ideaAgain: 'What should the next one do differently?',
+      },
+      submit: {
+        replies: 'New batch with these notes',
+        ideas: 'Regenerate with these notes',
+        ideaAgain: 'One more with these notes',
+      },
+      plain: {
+        replies: 'Just a new batch',
+        ideas: 'Just regenerate',
+        ideaAgain: 'Just one more',
+      },
+      placeholder: {
+        replies:
+          'Anything else? For example "more casual", "less polite", "as an indie developer"',
+        ideas:
+          'Anything else? For example "more relatable", "aimed at students", "skip the intro"',
+      },
+      anglesLabel: 'Directions (pick any)',
+      noteLabel: 'Your note',
+      count: '{{count}}/{{max}}',
+      cancel: 'Cancel',
+      applied: 'Following your notes: {{steer}}',
+      separator: ', ',
+      angles: {
+        replies: {
+          askDetail: 'Ask about details',
+          experience: 'Share experience',
+          pushBack: 'Push back',
+          addSource: 'Add sources',
+          humor: 'Funny / memes',
+          agree: 'Short +1',
+          askHelp: 'Ask for help',
+        },
+        ideas: {
+          downToEarth: 'More relatable',
+          controversial: 'More controversial',
+          shorter: 'Shorter',
+          funnier: 'Funnier',
+          newPersona: 'Different persona',
+        },
+      },
+    },
     // "Ask about this item" on the detail (`ask.tsx`, `server/providers/feed/ask.ts`).
     ask: {
       title: 'Ask about this item',

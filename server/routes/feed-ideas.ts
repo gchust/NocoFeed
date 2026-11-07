@@ -23,7 +23,8 @@ import { z } from 'zod';
 
 import { FeedError, feedIdeasToken } from '../providers/feed/index.js';
 import { IDEA_KINDS, X_LANGUAGES } from '../providers/feed/ideas.js';
-import { IdParams } from './feed-schemas.js';
+import { IDEA_ANGLES } from '../providers/feed/steer.js';
+import { IdParams, SteerSchema, steerBody } from './feed-schemas.js';
 
 /**
  * Ideas for creating something from an item (`server/providers/feed/ideas.ts`): the state of the caller's ideas about
@@ -46,6 +47,10 @@ const IdeaSetSchema = z
     webSearch: z.boolean(),
     model: z.string().nullable(),
     trigger: z.enum(['manual', 'auto']),
+    steer: SteerSchema.nullable().meta({
+      description:
+        'What the person asked for when these ideas were last written; null when nothing',
+    }),
   })
   .meta({ id: 'FeedIdeaSet' });
 
@@ -60,12 +65,12 @@ const IdeasStateSchema = z
   })
   .meta({ id: 'FeedIdeasState' });
 
-const IdeasRequestBody = z
-  .object({ kinds: z.array(Kind).max(IDEA_KINDS.length).optional() })
+const IdeasRequestBody = steerBody(IDEA_ANGLES)
+  .extend({ kinds: z.array(Kind).max(IDEA_KINDS.length).optional() })
   .meta({ id: 'FeedIdeasRequest' });
 
-const IdeaAgainBody = z
-  .object({ kind: Kind, index: z.number().int().min(0).max(10) })
+const IdeaAgainBody = steerBody(IDEA_ANGLES)
+  .extend({ kind: Kind, index: z.number().int().min(0).max(10) })
   .meta({ id: 'FeedIdeaAgain' });
 
 const IdeasDeleteQuery = z.object({ kind: Kind.optional() });
@@ -213,12 +218,12 @@ export const feedIdeasRoutes: AppApiRouteContribution<Application> =
       apiValidator('json', IdeasRequestBody),
       async (context) => {
         const { id } = context.req.valid('param');
-        const { kinds } = context.req.valid('json');
+        const { kinds, ...steer } = context.req.valid('json');
         const actor = actorOf(context);
         return context.json(
           {
             data: await guard(() =>
-              ideas().request(actor, actor.user.id, id, kinds),
+              ideas().request(actor, actor.user.id, id, kinds, steer),
             ),
           },
           202,
@@ -246,12 +251,12 @@ export const feedIdeasRoutes: AppApiRouteContribution<Application> =
       apiValidator('json', IdeaAgainBody),
       async (context) => {
         const { id } = context.req.valid('param');
-        const { kind, index } = context.req.valid('json');
+        const { kind, index, ...steer } = context.req.valid('json');
         const actor = actorOf(context);
         return context.json(
           {
             data: await guard(() =>
-              ideas().again(actor, actor.user.id, id, kind, index),
+              ideas().again(actor, actor.user.id, id, kind, index, steer),
             ),
           },
           202,

@@ -19,6 +19,7 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611210001_feed_reply_drafts.ts` (`feedReplyDrafts`, `feedProfiles.replyGuidelines`/`replyPlatformGuidelines`,
   see "Reply drafts" below).
   `202611250001_feed_ideas.ts` (`feedIdeas`, `feedIdeaSettings`: see "Ideas" below).
+  `202611270101_feed_steer.ts` (`feedReplyDrafts.steer`, `feedIdeas.steer`: see "Steering a rewrite" below).
   `202611260101_feed_admission.ts` (`feedAnalyses.heldVerdict`/`watchUntil`, `feedProfiles.waitForHeat`/`waitHours`:
   see "Admission of search results" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
@@ -150,8 +151,41 @@ under the analysis on the detail) and `client/pages/preferences/reply-guidelines
   drafts. At least `MIN_DRAFTS` (3) usable replies, else one retry, else `failed`.
 - **Copy.** Copying never changes the person's marks; the toast offers "Mark as joined", which goes through the mark
   writer. Drafts render as plain text (tags stripped on the server), never Markdown or HTML; no images are generated.
+- **A human voice.** `HUMAN_VOICE_RULE` (`steer.ts`) is in every reply prompt: no stock openers or closers ("Great
+  question", "As someone who…", "作为一个…"), no tidy three-part structure or summary ending, at most one em dash, no
+  excessive politeness, varied length (one line is fine), casual wording and the platform's own slang, a clearly
+  different angle and opening per draft. The default rules say "像真人随手写的" / "like a real person dashed it off";
+  changing a default changes its `guidelinesVersion`, so drafts under it show "rules changed". Rules a person saved
+  are never touched.
 - Tests: `tests/server/feed-replies.test.ts` (prompt language, rules, parsing, discuss-only ticks, background requests,
   limit, owner, routes), `tests/database/feed-reply-drafts-migration.test.ts`, `tests/client/feed-replies.test.tsx`.
+
+## Steering a rewrite
+
+Issue #20: "New batch" of reply drafts, and "Regenerate" or "One more" of ideas, first open a small panel
+(`client/pages/feed/steer.tsx`, lists and memory in `steer-model.ts`; server side `server/providers/feed/steer.ts`):
+directions to pick (replies `REPLY_ANGLES`: ask about details, share experience, push back, add sources, funny, short
++1, ask for help; ideas `IDEA_ANGLES`: more relatable, more controversial, shorter, funnier, different persona), a free
+note, "with these notes", "just …" (exactly the request without a body, as before) and cancel. The first drafts or
+ideas are still written at once, without the panel.
+
+- **API.** `POST /feedItems/:id/replies`, `POST /feedItems/:id/ideas` and `/ideas/again` take optional `angles` (the
+  known ones only, else `400`) and `note` (at most `STEER_NOTE_MAX` = 500, else `400`). The body stays optional for
+  replies. `normalizeSteer` keeps known angles in list order and `cleanNote` strips tags, control characters and the
+  `<<<`/`>>>` fences, collapses whitespace and cuts to 500 characters; nothing left means no steer.
+- **Prompt.** `steerBlock` puts "THIS ROUND" after the material and before the answer format, and the system prompt
+  says it wins over the person's rules or creator style but never allows misleading, made-up or unfriendly text.
+  The note is the person's own words (trusted, like their rules). Without a steer the prompt has no THIS ROUND at all.
+  `NO_META_RULE` and `materialLines` are unchanged: the steer is about the result, never about missing material.
+- **Stored.** The steer a result was written with is `steer` (JSON) on `feedReplyDrafts` / `feedIdeas` and in the
+  state; the card shows "Following your notes: …" under it. A plain new batch or regenerate stores null; a plain "One
+  more" keeps the set's steer. Automatic drafts and ideas have none.
+- **Prefill.** The panel opens with the item's stored steer, else the last steer used in this browser
+  (`localStorage` `nocofeed.steer.replies` / `nocofeed.steer.ideas`), so a note can be adjusted and sent again.
+- Copy in `feed.steer`. Tests: `tests/server/feed-steer.test.ts` (cleaning, limits, both prompts, human voice rules,
+  defaults), the issue #20 cases in `feed-replies.test.ts` / `feed-ideas.test.ts` (prompt, stored steer, plain batch
+  unchanged, `400`s), `tests/database/feed-steer-migration.test.ts`, and the panel cases in
+  `tests/client/feed-replies.test.tsx` / `feed-ideas.test.tsx`.
 
 ## Topics and subscriptions
 
@@ -427,7 +461,9 @@ on; never an image). Two per kind.
   (`models.services.capabilities`), a background OnlineAgent session (`onlineAgent.background`, `webSearch: true`,
   `tool: []`, JSON Schema `ideasSchema`) writes them and is deleted afterwards; if that fails, or search is not
   supported, `models.gateway.generate` writes them from the item alone and the card says so. Manual generation does
-  not count against `dailyLimit`.
+  not count against `dailyLimit`. The system prompt carries `HUMAN_VOICE_IDEAS_RULE` (no stock phrases, no templated
+  structure, varied rhythm, the platform's own slang); "Regenerate" and "One more" can be steered (see "Steering a
+  rewrite").
 - **Material first, and only what was read** (issue #17). Before writing, `generate` runs `deps.prepare` — the same
   `prepare` as "Ask about this item" (`ask.ts`, wired in `index.ts`): fetches the parts the item lacks, at most
   `ASK_PREPARE_MS`, never fails the ideas, and reads the linked page of a link-only item. The prompt's MATERIAL comes

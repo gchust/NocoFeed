@@ -1,4 +1,5 @@
 import type { useTranslation } from '@nocobase/i18n/client';
+import type { Steer } from './steer-model.js';
 
 /**
  * What the Ideas card and the idea settings share: the kinds, the shapes the server stores
@@ -58,6 +59,8 @@ export interface IdeaSet {
   readonly webSearch: boolean;
   readonly model: string | null;
   readonly trigger: 'manual' | 'auto';
+  /** What the person asked for when these ideas were last written (issue #20); null when nothing. */
+  readonly steer: Steer | null;
 }
 
 /** `GET /feedItems/:id/ideas`. */

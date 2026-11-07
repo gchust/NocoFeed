@@ -20,7 +20,8 @@ import {
   REPLY_GUIDELINES_MAX,
   REPLY_PLATFORMS,
 } from '../providers/feed/replies.js';
-import { IdParams } from './feed-schemas.js';
+import { REPLY_ANGLES } from '../providers/feed/steer.js';
+import { IdParams, SteerSchema, steerBody } from './feed-schemas.js';
 
 /**
  * Reply drafts (`server/providers/feed/replies.ts`, issue #15): replies to copy when joining a discussion, and the
@@ -56,8 +57,16 @@ const ReplyStateSchema = z
     available: z.boolean(),
     model: z.string().nullable(),
     updatedAt: z.string().nullable(),
+    steer: SteerSchema.nullable().meta({
+      description:
+        'What the person asked for when these drafts were written; null when nothing',
+    }),
   })
   .meta({ id: 'FeedReplyState' });
+
+const WriteRepliesBody = steerBody(REPLY_ANGLES).meta({
+  id: 'WriteFeedItemReplies',
+});
 
 const PlatformGuidelines = z.partialRecord(
   z.enum(REPLY_PLATFORMS),
@@ -163,18 +172,23 @@ export const feedReplyRoutes: AppApiRouteContribution<Application> =
         tags: ['Feed'],
         summary: 'Write the reply drafts for one of my items again',
         description:
-          'Answers at once with status `pending`; the configured model writes them in the background. Poll the GET until it is `ready` or `failed`.',
+          'Answers at once with status `pending`; the configured model writes them in the background. Poll the GET until it is `ready` or `failed`. The optional body steers this batch: picked `angles` and a free `note` (at most 500 characters, cleaned on the server); without it the batch is written under the rules alone.',
         operationId: 'writeFeedItemReplies',
         responses: {
           '202': dataResponse(ReplyStateSchema),
           ...errors,
+          '400': apiErrorResponse(400),
           '503': apiErrorResponse(503, 'When no chat model is configured'),
         },
       }),
       apiValidator('param', IdParams),
+      apiValidator('json', WriteRepliesBody),
       async (context) => {
         const { id } = context.req.valid('param');
-        const data = await guard(() => replies().request(ownerOf(context), id));
+        const body = context.req.valid('json');
+        const data = await guard(() =>
+          replies().request(ownerOf(context), id, body),
+        );
         return context.json({ data }, 202);
       },
     );
