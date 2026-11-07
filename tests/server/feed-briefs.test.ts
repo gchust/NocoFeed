@@ -204,12 +204,14 @@ async function setUp(testApp: Parameters<typeof signIn>[0]) {
         items: [
           {
             externalId: `${run}-shown`,
+            publishedAt: new Date().toISOString(),
             title: 'Postgres backups restored in minutes',
             body: 'We cut restore time from 3 hours to 4 minutes.',
             coverage,
           },
           {
             externalId: `${run}-hidden`,
+            publishedAt: new Date().toISOString(),
             title: 'Postgres and growing tomatoes',
             body: 'Soil and light.',
             coverage,

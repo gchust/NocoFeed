@@ -407,7 +407,9 @@ describe('feed page', () => {
     );
 
     const undated = await timeOf(/with no time/);
-    expect(undated).toHaveTextContent('collected 13 minutes ago');
+    expect(undated).toHaveTextContent(
+      'publication time unknown · collected 13 minutes ago',
+    );
     expect(undated.getAttribute('title')).toMatch(/gave no publication time/);
 
     const exact = await timeOf(/evaluate agent tool use/);

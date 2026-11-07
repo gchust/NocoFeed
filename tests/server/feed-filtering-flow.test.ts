@@ -112,6 +112,7 @@ async function setUp(
         items: collected.map((item) => ({
           ...item,
           externalId: `${run}-${item.externalId}`,
+          publishedAt: new Date().toISOString(),
         })),
         truncated: false,
       })),

@@ -206,3 +206,116 @@ export function settleWatch(
     uncertainty: [COPY[locale].thin, without].filter(Boolean).join(' '),
   };
 }
+
+/**
+ * The person's time window (`maxAgeDays`) for items whose publication time a list did not give (issue #21). The
+ * collection run drops what it can see is older than the window, but a list that gave no time (YouTube search text the
+ * Collector could not read, an RSS entry without a date) used to come in as if it were new: a three-year-old video in a
+ * feed of today's. Now such an item is held (`undated`) until its time is looked up (`resolvePublishedTimes`), then
+ * judged again; one found to be older than the window is held as `stale`. Neither is let in by attention, and both are
+ * listed under "Filtered" with the reason. Items from a single tracked post, pushed items and anything the person kept
+ * are left alone, as is everyone who keeps no window.
+ */
+export const TIME_GATES = ['undated', 'stale'] as const;
+export type TimeGate = (typeof TIME_GATES)[number];
+
+export function isTimeGate(gate: unknown): gate is TimeGate {
+  return (TIME_GATES as readonly unknown[]).includes(gate);
+}
+
+const DAY_MS = 86_400_000;
+/**
+ * An approximate time is either relative text ("3 weeks ago", the latest moment it allows) or a day sent as noon UTC,
+ * which may be up to a day earlier than the moment in the poster's time zone: a day's grace before calling it older.
+ */
+const APPROXIMATE_GRACE_MS = DAY_MS;
+
+export interface TimeContext {
+  /** The person's window in days; null when none applies to this item (no window, a tracked post, pushed, kept). */
+  maxAgeDays: number | null;
+  publishedAt: Date | null;
+  approximate: boolean;
+  /** When the item was collected: the window is counted back from then. */
+  collectedAt: Date;
+  /** Whether the time may still be looked up (the Collector reads it for this platform and has not tried yet). */
+  lookupPending: boolean;
+  locale: Locale;
+}
+
+/** Whether the item may be judged on its content: `ok`, or held for an unknown (`undated`) or old (`stale`) time. */
+export function timeStatus(context: TimeContext): 'ok' | TimeGate {
+  if (context.maxAgeDays == null || !(context.maxAgeDays > 0)) return 'ok';
+  if (!context.publishedAt || !Number.isFinite(context.publishedAt.getTime()))
+    return 'undated';
+  const cutoff = context.collectedAt.getTime() - context.maxAgeDays * DAY_MS;
+  const latest =
+    context.publishedAt.getTime() +
+    (context.approximate ? APPROXIMATE_GRACE_MS : 0);
+  return latest < cutoff ? 'stale' : 'ok';
+}
+
+const TIME_COPY: Record<
+  Locale,
+  {
+    pending: string;
+    unknown: string;
+    stale: (date: string, approximate: boolean, days: number) => string;
+  }
+> = {
+  'zh-CN': {
+    pending:
+      '发布时间未知：设置了时间窗口时，只放进能确认发布时间的内容。正在从原页面读取发布时间，读到后再决定。',
+    unknown:
+      '发布时间未知：平台没有给出，原页面也没读到，无法确认是否在时间窗口内，未放进信息流。',
+    stale: (date, approximate, days) =>
+      `发布于${approximate ? '约 ' : ''}${date}，早于你的时间窗口（最近 ${days} 天），未放进信息流。`,
+  },
+  'en-US': {
+    pending:
+      'Publication time unknown: with a time window only items whose time is known come in. Reading it from the original page; decided once it is known.',
+    unknown:
+      'Publication time unknown: the platform gave none and the original page did not say, so whether it is inside the time window cannot be told. Left out of the feed.',
+    stale: (date, approximate, days) =>
+      `Published ${approximate ? 'around ' : ''}${date}, before your time window (the last ${days} days). Left out of the feed.`,
+  },
+};
+
+/** The explanation of a time gate, in the item's locale. */
+export function timeCopy(gate: TimeGate, context: TimeContext): string {
+  const copy = TIME_COPY[context.locale];
+  if (gate === 'undated')
+    return context.lookupPending ? copy.pending : copy.unknown;
+  return copy.stale(
+    context.publishedAt!.toISOString().slice(0, 10),
+    context.approximate,
+    context.maxAgeDays ?? 0,
+  );
+}
+
+/** `uncertainty` without the explanation of an unknown time, so a new one replaces it rather than piling up. */
+export function withoutTimeCopy(uncertainty: string | null): string {
+  let rest = uncertainty ?? '';
+  for (const copy of Object.values(TIME_COPY))
+    rest = rest.replace(copy.pending, '').replace(copy.unknown, '');
+  return rest.replace(/\s{2,}/g, ' ').trim();
+}
+
+/** Holds `draft` for its time: out of the feed, with the verdict it would have had kept for when the time is known. */
+export function holdForTime(
+  draft: AnalysisDraft,
+  gate: TimeGate,
+  context: TimeContext,
+): AnalysisDraft {
+  const wanted =
+    draft.verdict === 'ignore' ? (draft.heldVerdict ?? null) : draft.verdict;
+  return {
+    ...draft,
+    verdict: 'ignore',
+    gate,
+    heldVerdict: wanted,
+    watchUntil: null,
+    uncertainty: [timeCopy(gate, context), withoutTimeCopy(draft.uncertainty)]
+      .filter(Boolean)
+      .join(' '),
+  };
+}

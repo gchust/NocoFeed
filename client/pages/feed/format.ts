@@ -156,8 +156,9 @@ export function absoluteTime(
 
 /**
  * When an item was published, as the feed shows it: "3 hours ago" for an exact time, "about 3 weeks ago" for one
- * worked out from the platform's relative text, and "collected 13 minutes ago" when the platform gave none, so the
- * time it was collected is never passed off as the time it was published. `title` says the full date and which it is.
+ * worked out from the platform's relative text, and "publication time unknown · collected 13 minutes ago" when the
+ * platform gave none, so the time it was collected is never passed off as the time it was published. `title` says
+ * the full date and which it is.
  */
 export function itemTime(
   t: TFunction,
@@ -177,7 +178,8 @@ export function itemTime(
     const time = relativeTime(item.createdAt, language, now);
     return {
       dateTime: item.createdAt,
-      text: t('feed.time.collected', { time }),
+      // Said outright: a collection time next to the title reads like a publication time.
+      text: t('feed.time.unknown', { time }),
       title: t('feed.time.collectedHint', {
         time: absoluteTime(item.createdAt, language),
       }),

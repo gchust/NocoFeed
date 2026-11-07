@@ -2,9 +2,18 @@
 
 export type NoiseKind =
   'none' | 'promo' | 'routine' | 'roundup' | 'hype' | 'teaser';
-/** `thin`, `reply` and `watching` are the admission rules for search results: left out of the feed, or still waiting. */
+/**
+ * `thin`, `reply` and `watching` are the admission rules for search results: left out of the feed, or still waiting.
+ * `undated` and `stale` are the time window: publication time unknown, or older than the window.
+ */
 export type AnalysisGate =
-  'prefilter' | 'awaitingMaterial' | 'thin' | 'reply' | 'watching';
+  | 'prefilter'
+  | 'awaitingMaterial'
+  | 'thin'
+  | 'reply'
+  | 'watching'
+  | 'undated'
+  | 'stale';
 
 export const PLATFORMS = [
   'reddit',

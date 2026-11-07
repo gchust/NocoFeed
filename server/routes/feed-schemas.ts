@@ -21,6 +21,8 @@ const GATE = z.enum([
   'thin',
   'reply',
   'watching',
+  'undated',
+  'stale',
 ]);
 const MODE = z.enum(['both', 'participate', 'learn']);
 const LOCALE = z.enum(['zh-CN', 'en-US']);
