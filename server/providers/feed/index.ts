@@ -267,6 +267,8 @@ export default class FeedProvider extends ServiceProvider<Application> {
         // Counts of recent items read again, so "Trending" follows attention as it grows rather than as it was at
         // collection; an item that turns hot gets the full analysis it skipped.
         await feed.refreshHeat();
+        // New, thin search results whose wait is over: their counts are read again and they come in or stay out.
+        await feed.settleWatching();
         // Briefs in the person's reading language for what the feed shows, a few per tick.
         await feed.briefPending();
         // Reply drafts in the post's own language for recent discussions, a few per tick.

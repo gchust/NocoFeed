@@ -135,7 +135,9 @@ later. For YouTube, `body` is the video's description (a search result has only 
 scheduled tick (`resolvePublishedTimes`), and leaves a Collector that answers `400` to it alone for six hours.
 
 Answer `{ "status": "ok", "message": null, "item": { "body": "…", "comments": […], "transcript": […], "media": […], "coverage": {…} } }`
-with only the parts it obtained. `media` comes with `body` (it is read from the same page) and replaces the stored list
+with only the parts it obtained. `metrics` (optional, the post's counts as read on the same page, same keys as in a
+collected item) lets NocoFeed update the heat of a new post it is watching (issue #19); without it the number of
+replies read counts as a lower bound. `media` comes with `body` (it is read from the same page) and replaces the stored list
 when present. A part that could not be fetched is reported in `coverage` with its reason; earlier
 material is kept. An empty `comments` list replaces stored comments only when `coverage.comments` is `available`
 (the thread was read and has none); report an unreadable post as `failed`/`notFound`, not as an empty thread.

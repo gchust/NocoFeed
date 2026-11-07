@@ -2,7 +2,9 @@
 
 export type NoiseKind =
   'none' | 'promo' | 'routine' | 'roundup' | 'hype' | 'teaser';
-export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
+/** `thin`, `reply` and `watching` are the admission rules for search results: left out of the feed, or still waiting. */
+export type AnalysisGate =
+  'prefilter' | 'awaitingMaterial' | 'thin' | 'reply' | 'watching';
 
 export const PLATFORMS = [
   'reddit',
@@ -45,6 +47,7 @@ export const VIEWS = [
   'saved',
   'later',
   'participated',
+  'filtered',
 ] as const;
 export type FeedView = (typeof VIEWS)[number];
 
@@ -88,6 +91,10 @@ export interface Profile {
   readonly maxAgeDays: number;
   /** The language briefs and translations are written in; null follows the interface. */
   readonly readingLanguage: ReadingLanguage | null;
+  /** A new, thin search result waits for its attention before it is decided. */
+  readonly waitForHeat: boolean;
+  /** How many hours after publication it waits. */
+  readonly waitHours: number;
 }
 
 export const READING_LANGUAGES = [

@@ -149,6 +149,8 @@ const FOLLOW_INTERFACE = 'interface';
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 /** The time windows offered for collection, in days; 0 keeps everything. */
 const MAX_AGE_DAYS = [1, 3, 7, 14, 30, 90, 0];
+/** How long a new, thin search result may wait for its attention (the server allows 1–48). */
+const WAIT_HOURS = [3, 6, 12, 24, 48];
 const hourLabel = (hour: number): string =>
   `${String(hour).padStart(2, '0')}:00`;
 
@@ -282,6 +284,8 @@ function PreferencesForm({
         readerAgentId: z.string(),
         maxAgeDays: z.number().int().min(0).max(365),
         readingLanguage: z.string(),
+        waitForHeat: z.boolean(),
+        waitHours: z.number().int().min(1).max(48),
       }),
     [t],
   );
@@ -340,6 +344,8 @@ function PreferencesForm({
       readerAgentId: profile.readerAgentId ?? NO_AGENT,
       maxAgeDays: profile.maxAgeDays,
       readingLanguage: profile.readingLanguage ?? FOLLOW_INTERFACE,
+      waitForHeat: profile.waitForHeat,
+      waitHours: profile.waitHours,
     },
   });
   const languageItems = [
@@ -380,6 +386,8 @@ function PreferencesForm({
         readerAgentId: data.readerAgentId ?? NO_AGENT,
         maxAgeDays: data.maxAgeDays,
         readingLanguage: data.readingLanguage ?? FOLLOW_INTERFACE,
+        waitForHeat: data.waitForHeat,
+        waitHours: data.waitHours,
       });
       toaster.show({
         type: 'success',
@@ -416,6 +424,17 @@ function PreferencesForm({
     control: form.control,
     name: 'digestEnabled',
   });
+  const waitForHeat = useWatch({
+    control: form.control,
+    name: 'waitForHeat',
+  });
+  // A wait set through the API that the list does not offer stays visible and selected.
+  const waitItems = [...new Set([...WAIT_HOURS, profile.waitHours])]
+    .sort((a, b) => a - b)
+    .map((hours) => ({
+      value: hours,
+      label: t('preferences.waitHoursValue', { count: hours }),
+    }));
 
   const text = (
     name: 'interests' | 'expertise' | 'avoid',
@@ -557,6 +576,66 @@ function PreferencesForm({
                 </Field>
               )}
             />
+            <Controller
+              control={form.control}
+              name='waitForHeat'
+              render={({ field }) => (
+                <Field orientation='horizontal'>
+                  <FieldContent>
+                    <FieldLabel htmlFor={`${FORM_ID}-waitForHeat`}>
+                      {t('preferences.fields.waitForHeat')}
+                    </FieldLabel>
+                    <FieldDescription>
+                      {t('preferences.hints.waitForHeat')}
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    id={`${FORM_ID}-waitForHeat`}
+                    checked={field.value}
+                    onCheckedChange={(checked) => field.onChange(checked)}
+                  />
+                </Field>
+              )}
+            />
+            {waitForHeat ? (
+              <Controller
+                control={form.control}
+                name='waitHours'
+                render={({ field }) => (
+                  <Field className='max-w-xs'>
+                    <FieldLabel htmlFor={`${FORM_ID}-waitHours`}>
+                      {t('preferences.fields.waitHours')}
+                    </FieldLabel>
+                    <Select
+                      items={waitItems}
+                      value={field.value}
+                      onValueChange={(value) =>
+                        field.onChange(Number(value ?? 12))
+                      }
+                    >
+                      <SelectTrigger
+                        id={`${FORM_ID}-waitHours`}
+                        className='w-full'
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {waitItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      {t('preferences.hints.waitHours')}
+                    </FieldDescription>
+                  </Field>
+                )}
+              />
+            ) : null}
             <Controller
               control={form.control}
               name='digestEnabled'

@@ -45,6 +45,9 @@ const profile: Profile = {
   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
   readerAgentId: null,
   maxAgeDays: 7,
+  readingLanguage: null,
+  waitForHeat: true,
+  waitHours: 12,
 };
 
 const catalog = {
@@ -152,5 +155,43 @@ describe('preferences page', () => {
       ([entry]) => entry.method === 'PUT' && entry.path === 'feedProfile',
     )!;
     expect(call.json).toMatchObject({ maxAgeDays: 1 });
+  });
+
+  it('sets how long a new thin post waits for its heat, or turns waiting off', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+    const hours = await screen.findByRole('combobox', {
+      name: enUS.preferences.fields.waitHours,
+    });
+    expect(hours.textContent).toContain('12 hours after publication');
+    await user.click(hours);
+    await user.click(
+      await screen.findByRole('option', {
+        name: '24 hours after publication',
+      }),
+    );
+    const toggle = screen.getByRole('switch', {
+      name: enUS.preferences.fields.waitForHeat,
+    });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await user.click(toggle);
+    // Off: the wait no longer applies, so it is not offered.
+    expect(
+      screen.queryByRole('combobox', {
+        name: enUS.preferences.fields.waitHours,
+      }),
+    ).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          ([call]) => call.method === 'PUT' && call.path === 'feedProfile',
+        ),
+      ).toBe(true),
+    );
+    const [call] = api.mock.calls.find(
+      ([entry]) => entry.method === 'PUT' && entry.path === 'feedProfile',
+    )!;
+    expect(call.json).toMatchObject({ waitForHeat: false, waitHours: 24 });
   });
 });

@@ -73,8 +73,15 @@ export interface AnalysisDraft {
   qualityDetail: QualityDetail | null;
   /** What the feed sorts by. */
   priority: number;
-  /** Why the full analysis did not run. */
+  /** Why the full analysis did not run, or why the admission rules held the item back. */
   gate: AnalysisGate | null;
+  /**
+   * The verdict the item would have shown had worth or the admission rules not hidden it: lets attention that comes
+   * later (`HOT_HEAT`) let it in as a hot item without another model call. Absent or null when nothing was held back.
+   */
+  heldVerdict?: Verdict | null;
+  /** For `gate: 'watching'`: when to read the item's counts again and decide. */
+  watchUntil?: Date | null;
   /** `agent` is a runner agent of the Agents plugin that read the original itself (`agent-reader.ts`). */
   engine: 'rules' | 'model' | 'agent';
   model: string | null;
@@ -97,7 +104,12 @@ export const RULES_VERSION = 'rules-4';
 export const PROMPT_VERSION = 'prompt-7';
 export const PREFILTER_VERSION = 'prefilter-1';
 
-export type AnalysisGate = 'prefilter' | 'awaitingMaterial';
+/**
+ * Why an item is not shown as recommended although it may concern the person: `prefilter` and `awaitingMaterial` stopped
+ * the full analysis; `thin`, `reply` and `watching` are the admission rules for search results (`admission.ts`).
+ */
+export type AnalysisGate =
+  'prefilter' | 'awaitingMaterial' | 'thin' | 'reply' | 'watching';
 
 const CONTENT_TYPES = [
   'release',
@@ -153,6 +165,13 @@ const NOISE_CAPS: Readonly<Record<NoiseKind, number>> = {
   roundup: 40,
   routine: 40,
 };
+
+/** Noise that hides an item whatever its attention: selling, claiming without showing, announcing what is not there. */
+export const HIDDEN_NOISE: ReadonlySet<NoiseKind> = new Set([
+  'promo',
+  'teaser',
+  'hype',
+]);
 
 /** Quality assumed where no model judged it, so rule analyses neither lead nor trail model ones for that reason alone. */
 export const NEUTRAL_QUALITY = 50;
@@ -1011,11 +1030,20 @@ export function parseModelAnswer(
     ? (value.experienceLevel as ExperienceLevel)
     : 'none';
   let verdict = pick('verdict', VERDICTS);
+  let heldVerdict: Verdict | null = null;
   // The server applies these so that the two judgements cannot contradict each other on the card.
   // Low worth hides an item whatever was read: a blurb that does not show worth has not earned attention. A bare
-  // title with more to fetch never reaches here; it waits for material (`awaitingMaterial`).
-  if (quality !== null && quality < LOW_QUALITY) verdict = 'ignore';
-  else if (
+  // title with more to fetch never reaches here; it waits for material (`awaitingMaterial`). What was hidden only for
+  // being thin (not for selling or hype) keeps the verdict it had, so a search result that turns hot can still come in.
+  if (quality !== null && quality < LOW_QUALITY) {
+    if (
+      verdict !== 'ignore' &&
+      qualityDetail &&
+      !HIDDEN_NOISE.has(qualityDetail.noise)
+    )
+      heldVerdict = verdict === 'discuss' ? 'learn' : verdict;
+    verdict = 'ignore';
+  } else if (
     verdict === 'discuss' &&
     qualityDetail &&
     qualityDetail.noise !== 'none'
@@ -1029,6 +1057,7 @@ export function parseModelAnswer(
     qualityDetail,
     priority: priorityOf(score, quality),
     gate: null,
+    heldVerdict,
     interestLevel,
     interestReason: str('interestReason'),
     experienceLevel,

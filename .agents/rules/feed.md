@@ -19,6 +19,8 @@ the person's topics and experience, and the person keeps their own marks and not
   `202611210001_feed_reply_drafts.ts` (`feedReplyDrafts`, `feedProfiles.replyGuidelines`/`replyPlatformGuidelines`,
   see "Reply drafts" below).
   `202611250001_feed_ideas.ts` (`feedIdeas`, `feedIdeaSettings`: see "Ideas" below).
+  `202611260101_feed_admission.ts` (`feedAnalyses.heldVerdict`/`watchUntil`, `feedProfiles.waitForHeat`/`waitHours`:
+  see "Admission of search results" below).
 - Domain: `server/providers/feed/` — `catalog.ts` (platforms and operations; the single source of what is native and
   what needs the Collector), `adapters.ts` (fetching and parsing), `analyzer.ts` (rules and model prompt),
   `service.ts` (everything the routes call), `index.ts` (provider, notifications and the `collect-due-sources`,
@@ -273,6 +275,22 @@ under the analysis on the detail) and `client/pages/preferences/reply-guidelines
   judged by the rules or stopped at a gate has its comments fetched and gets the full analysis past both gates
   (`lookAtHotItem`, at most `HOT_ANALYSES_PER_TICK`, counted against `dailyLimit`). The model prompt shows the counts
   as ENGAGEMENT and is told never to raise quality for them.
+- **Admission of search results** (`admission.ts`, issue #19). A topic search finds whatever mentions its words, so a
+  keyword match proves nothing. `writeAnalysis` passes every analysis of a search result (`feedSources.topicId`) through
+  `admit`: substance shown (model quality ≥ `LOW_QUALITY`) or not judgeable by the rules (longer text, video) comes in;
+  a thin item (model quality below the bar, or a short text post on X/Xiaohongshu/Reddit with no media that only the
+  rules judged) or an X reply (`@name …`) without `SOLID_QUALITY` comes in only once `heat >= HOT_HEAT`, and is
+  otherwise `verdict: ignore` with `gate` `thin`/`reply` and `heldVerdict` (the verdict it would have had). A thin post
+  younger than the person's `waitHours` (Preferences, 12 by default; `waitForHeat` off decides at once) is
+  `gate: watching` until `watchUntil`; the tick's `settleWatching` then reads its counts again (native for
+  `REFRESHABLE_PLATFORMS`, the Collector's discussion for X/Xiaohongshu, `WATCH_COLLECTOR_PER_TICK` a tick, retried for
+  `WATCH_GRACE_MS`; a Collector's optional `item.metrics` on enrich is used, else the replies read are a lower bound)
+  and lets it in when hot or leaves it `thin`. `MAX_WATCHING` per person: the oldest beyond it are decided at once.
+  `refreshHeat` lets a held item that turns hot in (`lookAtHotItem`: a model's analysis is released without another
+  call). Subscriptions, mail, pushes, anything kept (favourite/later/participated/notes) and the person's "Analyze
+  again" (never waits) are exempt as stated in `admit`. Selling, teasers and hype (`HIDDEN_NOISE`) never come in on
+  heat. The `filtered` view lists `verdict: ignore` with the gate as the reason. For analyses stored before, run
+  `feed reapply-admission` (`--dry-run` first): it only hides, skips kept and dismissed items, calls no model.
 - **Two ways in: `hot` and `solid`.** Both views list only recommended items (`discuss`/`learn`, not dismissed).
   `hot` adds `heat >= HOT_HEAT` within the heat window and sorts by heat under `sort=priority`; `solid` adds
   `quality >= SOLID_QUALITY` (60, so only model analyses) and sorts by quality. The client opens both in that order

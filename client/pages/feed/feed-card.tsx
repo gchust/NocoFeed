@@ -128,8 +128,9 @@ function ComfortableCard({
         {item.noise !== 'none' ? (
           <span>{t(`feed.noise.${item.noise}`)}</span>
         ) : null}
-        {item.gate === 'awaitingMaterial' ? (
-          <span>{t('feed.gate.awaitingMaterial')}</span>
+        {item.gate === 'awaitingMaterial' ||
+        (item.gate && item.verdict === 'ignore') ? (
+          <span>{t(`feed.gate.${item.gate}`)}</span>
         ) : null}
         {topicName ? <span>#{topicName}</span> : null}
         <StateIcons item={item} className='ml-auto' />
