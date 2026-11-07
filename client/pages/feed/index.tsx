@@ -10,6 +10,7 @@ import {
   MessagesSquareIcon,
   GraduationCapIcon,
   CheckCheckIcon,
+  FilterXIcon,
   LayersIcon,
   FlameIcon,
   GemIcon,
@@ -96,6 +97,7 @@ const VIEW_ICONS = {
   saved: BookmarkIcon,
   later: ClockIcon,
   participated: CheckCheckIcon,
+  filtered: FilterXIcon,
 } as const;
 
 const PAGE_SIZE = 30;

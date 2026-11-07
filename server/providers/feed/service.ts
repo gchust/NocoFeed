@@ -65,6 +65,13 @@ import {
   heatOf,
   refreshInterval,
 } from './heat.js';
+import {
+  admit,
+  DEFAULT_WAIT_HOURS,
+  isHoldGate,
+  release,
+  settleWatch,
+} from './admission.js';
 import { coverOf } from './media.js';
 import { mapLimit, truncate } from './text.js';
 import { createHash } from 'node:crypto';
@@ -92,7 +99,9 @@ export type FeedView =
   | 'learn'
   | 'saved'
   | 'later'
-  | 'participated';
+  | 'participated'
+  /** Left out of the feed (`verdict: ignore`), with the reason in the gate and the uncertainty. */
+  | 'filtered';
 /** From here a model analysis counts as solid: real substance, new, supported, usable (see `qualityOf`). */
 export const SOLID_QUALITY = 60;
 /** How far back the feed list reaches, by when an item was published. */
@@ -122,6 +131,10 @@ export interface Profile {
   maxAgeDays: number;
   /** The language briefs and translations are written in; `original` keeps each item's; null follows the interface. */
   readingLanguage: ReadingLanguage | null;
+  /** A new, thin search result waits for its attention before it is decided (`admission.ts`). */
+  waitForHeat: boolean;
+  /** How long after publication it waits. */
+  waitHours: number;
 }
 
 export type SourceHealth = 'ok' | 'failing' | 'quiet';
@@ -383,6 +396,7 @@ export interface FeedSummary {
   saved: number;
   later: number;
   participated: number;
+  filtered: number;
   /** How many of each view's items are unread, under the same filters. */
   unread: Record<FeedView, number>;
   /** Items whose followed thread has replies the person has not seen. */
@@ -560,6 +574,43 @@ const EXCERPT_LENGTH = 280;
 const READ_BATCH = 200;
 const HOUR_MS = 3_600_000;
 
+/**
+ * Watched items (`admission.ts`) decided per tick, how long reading their counts may take, and how many of those reads
+ * go to the Collector (each opens the post's page on X or Xiaohongshu, so they are few). A read that could not be made
+ * is retried for `WATCH_GRACE_MS` past the deadline. `MAX_WATCHING` per person keeps watching from piling up.
+ */
+const WATCH_PER_TICK = 20;
+const WATCH_BUDGET_MS = 60_000;
+const WATCH_COLLECTOR_PER_TICK = 3;
+const WATCH_COLLECTOR_PLATFORMS = ['x', 'xiaohongshu'];
+const WATCH_GRACE_MS = 6 * 3_600_000;
+export const MAX_WATCHING = 300;
+
+/**
+ * The counts after reading a post's discussion through the Collector: the counts it sent with it, or else the stored
+ * ones with the replies read as a lower bound for the reply count (X `replies`, Xiaohongshu `comments`). Null when
+ * nothing countable came back.
+ */
+export function countsAfterRead(
+  platform: string,
+  known: Record<string, number> | null,
+  result: Pick<EnrichResult, 'metrics' | 'comments'>,
+): Record<string, number> | null {
+  const sent = Object.fromEntries(
+    Object.entries(result.metrics ?? {}).filter(
+      ([, value]) =>
+        typeof value === 'number' && Number.isFinite(value) && value >= 0,
+    ),
+  );
+  if (Object.keys(sent).length) return { ...(known ?? {}), ...sent };
+  if (!result.comments) return null;
+  const key = platform === 'x' ? 'replies' : 'comments';
+  return {
+    ...(known ?? {}),
+    [key]: Math.max(known?.[key] ?? 0, result.comments.length),
+  };
+}
+
 /** Failed runs in a row before a subscription counts as failing. */
 export const FAILURE_ALERT = 3;
 /** Runs in a row without anything new, spanning at least three days, before a subscription counts as quiet. */
@@ -725,6 +776,8 @@ export function createFeedService(deps: FeedServiceDeps) {
       maxAgeDays: Number(row?.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS),
       readingLanguage:
         (row?.readingLanguage as ReadingLanguage | null | undefined) ?? null,
+      waitForHeat: row?.waitForHeat == null ? true : bool(row.waitForHeat),
+      waitHours: Number(row?.waitHours ?? DEFAULT_WAIT_HOURS),
     };
   }
 
@@ -743,6 +796,8 @@ export function createFeedService(deps: FeedServiceDeps) {
           | 'readerAgentId'
           | 'maxAgeDays'
           | 'readingLanguage'
+          | 'waitForHeat'
+          | 'waitHours'
         >
       > & {
         locale?: Locale;
@@ -774,6 +829,10 @@ export function createFeedService(deps: FeedServiceDeps) {
       ...(input.readingLanguage !== undefined
         ? { readingLanguage: input.readingLanguage }
         : {}),
+      ...(input.waitForHeat !== undefined
+        ? { waitForHeat: input.waitForHeat }
+        : {}),
+      ...(input.waitHours !== undefined ? { waitHours: input.waitHours } : {}),
       ...(input.resetLearning ? { termWeights: null } : {}),
       updatedAt: new Date(),
     };
@@ -2068,18 +2127,71 @@ export function createFeedService(deps: FeedServiceDeps) {
           locale,
         );
       }
-      await writeAnalysis(ownerId, row, draft);
+      await writeAnalysis(ownerId, row, draft, { asked });
       count += 1;
     }
     return count;
   }
 
-  /** Makes `draft` the item's current analysis; earlier ones stay as history. */
+  /**
+   * What the admission rules (`admission.ts`) need beyond the analysis: whether the item came from a topic search,
+   * whether the person kept it, and how long they let new posts wait.
+   */
+  async function admissionContext(
+    ownerId: string,
+    row: Row,
+    { asked = false, now = new Date() }: { asked?: boolean; now?: Date } = {},
+  ) {
+    const [profile, source, state] = await Promise.all([
+      getProfile(ownerId),
+      row.sourceId == null
+        ? null
+        : (repo('feedSources').findOne({
+            filter: { ownerId, id: Number(row.sourceId) },
+          }) as Promise<Row | null>),
+      repo('feedItemStates').findOne({
+        filter: { ownerId, itemId: Number(row.id) },
+      }) as Promise<Row | null>,
+    ]);
+    return {
+      fromSearch: source?.topicId != null,
+      kept: Boolean(
+        state &&
+        (bool(state.favorite) ||
+          bool(state.later) ||
+          bool(state.participated) ||
+          text(state.notes).trim()),
+      ),
+      asked,
+      heat: row.heat == null ? null : Number(row.heat),
+      publishedAt: new Date(
+        (row.publishedAt ?? row.timelineAt ?? row.createdAt ?? now) as Date,
+      ),
+      waitForHeat: profile.waitForHeat,
+      waitHours: profile.waitHours,
+      now,
+      locale: localeFor(
+        profile.locale,
+        `${profile.interests}${text(row.title)}`,
+      ),
+    };
+  }
+
+  /**
+   * Makes `draft` the item's current analysis; earlier ones stay as history. A search result passes the admission
+   * rules first, so a thin, unnoticed one is held back with the reason (`asked`: the person asked, so it never waits).
+   */
   async function writeAnalysis(
     ownerId: string,
     row: Row,
-    draft: AnalysisDraft,
+    analysed: AnalysisDraft,
+    { asked = false }: { asked?: boolean } = {},
   ) {
+    const draft = admit(
+      toAnalysisItem(row),
+      analysed,
+      await admissionContext(ownerId, row, { asked }),
+    );
     await database.transaction(async (connection) => {
       await connection.query
         .updateTable('feedAnalyses')
@@ -2293,7 +2405,7 @@ export function createFeedService(deps: FeedServiceDeps) {
             ? await agentDraft(ownerId, item, result)
             : null;
         if (draft) {
-          await writeAnalysis(ownerId, item, draft);
+          await writeAnalysis(ownerId, item, draft, { asked: true });
           await finishRun(Number(run.id), {
             status: 'succeeded',
             found: 1,
@@ -2729,6 +2841,12 @@ export function createFeedService(deps: FeedServiceDeps) {
     })) as Row | null;
     if (current && current.engine === 'model' && current.gate == null)
       return false;
+    // Held back by the admission rules for being thin and unnoticed: a model that judged it already said what it is
+    // worth, so the attention lets it in without asking again.
+    if (current && current.engine !== 'rules' && isHoldGate(current.gate)) {
+      await releaseHeld(Number(current.id), current);
+      return false;
+    }
     const row = await requireRow('feedItems', ownerId, itemId);
     const sourceId = row.sourceId == null ? null : Number(row.sourceId);
     const source =
@@ -2754,6 +2872,174 @@ export function createFeedService(deps: FeedServiceDeps) {
     }
     await analyzeItems(ownerId, [itemId], sourceId, { asked: true });
     return true;
+  }
+
+  /** Lets an item the admission rules held back into the feed, with the verdict it would have had. */
+  async function releaseHeld(analysisId: number, current: Row) {
+    const released = release({
+      verdict: current.verdict as Verdict,
+      gate: current.gate as AnalysisGate,
+      heldVerdict: (current.heldVerdict as Verdict | null) ?? 'learn',
+    } as AnalysisDraft);
+    await database
+      .query()
+      .updateTable('feedAnalyses')
+      .set({
+        verdict: released.verdict,
+        gate: null,
+        heldVerdict: null,
+        watchUntil: null,
+      })
+      .where('id', '=', analysisId)
+      .execute();
+  }
+
+  /**
+   * Watched items whose time is up (`watchUntil`): their counts are read again — natively where the platform allows
+   * (`REFRESHABLE_PLATFORMS`), through the Collector's discussion for X and Xiaohongshu, a few per tick — and they come
+   * in when hot or stay out as thin. A read the Collector could not make is tried again on later ticks for
+   * `WATCH_GRACE_MS`, then the item is decided on the counts it has. Beyond `MAX_WATCHING` per person the oldest are
+   * decided at once on what is known, so watching never piles up. Calls no model. Returns how many were decided.
+   */
+  async function settleWatching({
+    now = new Date(),
+    limit = WATCH_PER_TICK,
+    maxWatching = MAX_WATCHING,
+  }: {
+    now?: Date;
+    limit?: number;
+    maxWatching?: number;
+  } = {}): Promise<number> {
+    const select = () =>
+      database
+        .query()
+        .selectFrom('feedAnalyses as a')
+        .innerJoin('feedItems as i', 'i.id', 'a.itemId')
+        .select([
+          'a.id as analysisId',
+          'a.heldVerdict',
+          'a.uncertainty',
+          'a.watchUntil',
+          'i.id',
+          'i.ownerId',
+          'i.platform',
+          'i.externalId',
+          'i.url',
+          'i.title',
+          'i.metrics',
+          'i.heat',
+          'i.comments',
+        ])
+        .where('a.current', '=', true)
+        .where('a.gate', '=', 'watching');
+    const decide = async (row: Row, heat: number | null) => {
+      const profile = await getProfile(String(row.ownerId));
+      const locale = localeFor(
+        profile.locale,
+        `${profile.interests}${text(row.title)}`,
+      );
+      const outcome = settleWatch(
+        {
+          heldVerdict: (row.heldVerdict as Verdict | null) ?? null,
+          uncertainty: (row.uncertainty as string | null) ?? null,
+        },
+        heat,
+        locale,
+      );
+      await database
+        .query()
+        .updateTable('feedAnalyses')
+        .set({
+          ...outcome,
+          heldVerdict: outcome.gate ? (row.heldVerdict ?? null) : null,
+          watchUntil: null,
+        })
+        .where('id', '=', Number(row.analysisId))
+        .execute();
+    };
+    let decided = 0;
+    // Over the cap: the oldest are decided on what is known.
+    const watching = await select()
+      .orderBy('a.watchUntil', 'desc')
+      .execute<Row>();
+    const perOwner = new Map<string, number>();
+    for (const row of watching) {
+      const owner = String(row.ownerId);
+      const seen = (perOwner.get(owner) ?? 0) + 1;
+      perOwner.set(owner, seen);
+      if (seen <= maxWatching) continue;
+      await decide(row, row.heat == null ? null : Number(row.heat));
+      decided += 1;
+    }
+    const due = await select()
+      .where('a.watchUntil', '<=', now)
+      .orderBy('a.watchUntil', 'asc')
+      .limit(limit)
+      .execute<Row>();
+    const deadline = Date.now() + WATCH_BUDGET_MS;
+    let collectorReads = 0;
+    let collectorStopped = false;
+    for (const row of due) {
+      if (Date.now() >= deadline) break;
+      const platform = String(row.platform);
+      const known = json<Record<string, number> | null>(row.metrics, null);
+      let metrics: Record<string, number> | null = null;
+      let tried = false;
+      try {
+        if ((REFRESHABLE_PLATFORMS as readonly string[]).includes(platform)) {
+          tried = true;
+          metrics = await adapters.metrics(
+            platform,
+            String(row.externalId),
+            AbortSignal.timeout(15_000),
+          );
+        } else if (
+          WATCH_COLLECTOR_PLATFORMS.includes(platform) &&
+          adapters.collectorConfigured() &&
+          !collectorStopped &&
+          collectorReads < WATCH_COLLECTOR_PER_TICK
+        ) {
+          tried = true;
+          collectorReads += 1;
+          const result = await adapters.enrich({
+            platform,
+            externalId: String(row.externalId),
+            url: (row.url as string | null) ?? null,
+            want: ['comments'],
+            signal: AbortSignal.timeout(MAX_RUN_MS),
+          });
+          if (PREFETCH_STOPS.has(result.status)) collectorStopped = true;
+          if (result.status === 'ok' || result.status === 'partial')
+            metrics = countsAfterRead(platform, known, result);
+        }
+      } catch (error) {
+        deps.log('warn', 'feed watch refresh failed', {
+          itemId: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      const overdue =
+        now.getTime() - new Date(row.watchUntil as Date).getTime() >=
+        WATCH_GRACE_MS;
+      // Could have been read but was not (failed, or the Collector's share of this tick is used up): try again on a
+      // later tick, unless it has waited long enough.
+      const later =
+        !tried &&
+        WATCH_COLLECTOR_PLATFORMS.includes(platform) &&
+        adapters.collectorConfigured();
+      if (!overdue && ((tried && !metrics) || later)) continue;
+      let heat = row.heat == null ? null : Number(row.heat);
+      if (metrics) {
+        heat = heatOf(platform, metrics);
+        await repo('feedItems').updateOne({
+          filter: { id: Number(row.id) },
+          values: { metrics, heat, metricsCheckedAt: now },
+        } as never);
+      }
+      await decide(row, heat);
+      decided += 1;
+    }
+    return decided;
   }
 
   /**
@@ -3343,6 +3629,9 @@ export function createFeedService(deps: FeedServiceDeps) {
       case 'all':
         builder = builder.where('a.verdict', 'in', ['discuss', 'learn']);
         break;
+      case 'filtered':
+        builder = builder.where('a.verdict', '=', 'ignore');
+        break;
       // Attention alone recommends nothing: a hot item still has to concern the person and be worth something.
       case 'hot':
         builder = builder
@@ -3361,7 +3650,9 @@ export function createFeedService(deps: FeedServiceDeps) {
     // Dismissed items leave the feed; what the person kept on purpose stays in its own view.
     if (
       query.view &&
-      ['all', 'hot', 'solid', 'discuss', 'learn'].includes(query.view)
+      ['all', 'hot', 'solid', 'discuss', 'learn', 'filtered'].includes(
+        query.view,
+      )
     )
       builder = builder.where((eb) =>
         eb.or([eb('s.dismissed', 'is', null), eb('s.dismissed', '=', false)]),
@@ -3564,6 +3855,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       'saved',
       'later',
       'participated',
+      'filtered',
     ] as const;
     const [counts, unreadCounts, replies, sources] = await Promise.all([
       Promise.all(views.map((view) => count(view))),
@@ -3575,8 +3867,17 @@ export function createFeedService(deps: FeedServiceDeps) {
         .execute(),
       listSources(ownerId),
     ]);
-    const [all, hot, solid, discuss, learn, saved, later, participated] =
-      counts;
+    const [
+      all,
+      hot,
+      solid,
+      discuss,
+      learn,
+      saved,
+      later,
+      participated,
+      filtered,
+    ] = counts;
     return {
       all,
       hot,
@@ -3586,6 +3887,7 @@ export function createFeedService(deps: FeedServiceDeps) {
       saved,
       later,
       participated,
+      filtered,
       unread: Object.fromEntries(
         views.map((view, index) => [view, unreadCounts[index]]),
       ) as FeedSummary['unread'],
@@ -3959,6 +4261,78 @@ export function createFeedService(deps: FeedServiceDeps) {
     return { checked: rows.length, requalified, hidden };
   }
 
+  /**
+   * Applies the admission rules (`admission.ts`) to search results already in the feed: a thin one nobody noticed is
+   * left out (`thin`, `reply`), or watched when still new. Only hides, and never what the person kept (favourite,
+   * later, participated, notes) or dismissed; an item the person reads later comes back the moment it turns hot.
+   * Calls no model; `dryRun` changes nothing.
+   */
+  async function reapplyAdmission(
+    options: { dryRun?: boolean; now?: Date } = {},
+  ): Promise<{ checked: number; hidden: string[]; watching: string[] }> {
+    const now = options.now ?? new Date();
+    const rows = await database
+      .query()
+      .selectFrom('feedAnalyses as a')
+      .innerJoin('feedItems as i', 'i.id', 'a.itemId')
+      .innerJoin('feedSources as src', 'src.id', 'i.sourceId')
+      .selectAll('i')
+      .select([
+        'a.id as analysisId',
+        'a.verdict as currentVerdict',
+        'a.quality as currentQuality',
+        'a.qualityDetail as currentQualityDetail',
+        'a.uncertainty as currentUncertainty',
+      ])
+      .where('a.current', '=', true)
+      .where('a.verdict', 'in', ['discuss', 'learn'])
+      .where('a.gate', 'is', null)
+      .where('src.topicId', 'is not', null)
+      .execute<Row>();
+    const hidden: string[] = [];
+    const watching: string[] = [];
+    for (const row of rows) {
+      await yieldToRequests();
+      const ownerId = String(row.ownerId);
+      const context = await admissionContext(ownerId, row, { now });
+      const state = (await repo('feedItemStates').findOne({
+        filter: { ownerId, itemId: Number(row.id) },
+      })) as Row | null;
+      if (state && bool(state.dismissed)) continue;
+      const draft = admit(
+        toAnalysisItem(row),
+        {
+          verdict: row.currentVerdict as Verdict,
+          quality:
+            row.currentQuality == null ? null : Number(row.currentQuality),
+          qualityDetail: json<QualityDetail | null>(
+            row.currentQualityDetail,
+            null,
+          ),
+          gate: null,
+          uncertainty: text(row.currentUncertainty),
+        } as AnalysisDraft,
+        context,
+      );
+      if (draft.verdict !== 'ignore') continue;
+      (draft.gate === 'watching' ? watching : hidden).push(text(row.title));
+      if (options.dryRun) continue;
+      await database
+        .query()
+        .updateTable('feedAnalyses')
+        .set({
+          verdict: 'ignore',
+          gate: draft.gate,
+          heldVerdict: draft.heldVerdict ?? null,
+          watchUntil: draft.watchUntil ?? null,
+          uncertainty: draft.uncertainty,
+        })
+        .where('id', '=', Number(row.analysisId))
+        .execute();
+    }
+    return { checked: rows.length, hidden, watching };
+  }
+
   /** Everyone with items, for commands that act on one person's feed. */
   async function itemOwners(): Promise<string[]> {
     const rows = await database
@@ -4276,6 +4650,8 @@ export function createFeedService(deps: FeedServiceDeps) {
     translateItem,
     briefPending,
     reapplyWorth,
+    reapplyAdmission,
+    settleWatching,
     judgeCase,
     summary,
     digest,

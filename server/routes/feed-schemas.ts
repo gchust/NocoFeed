@@ -14,7 +14,13 @@ const PLATFORM = z.enum([...PUBLIC_PLATFORMS, 'mail', 'inbox']);
 /** Platforms a topic can search. */
 const SEARCH_PLATFORM = z.enum(PUBLIC_PLATFORMS);
 const NOISE = z.enum(['none', 'promo', 'routine', 'roundup', 'hype', 'teaser']);
-const GATE = z.enum(['prefilter', 'awaitingMaterial']);
+const GATE = z.enum([
+  'prefilter',
+  'awaitingMaterial',
+  'thin',
+  'reply',
+  'watching',
+]);
 const MODE = z.enum(['both', 'participate', 'learn']);
 const LOCALE = z.enum(['zh-CN', 'en-US']);
 const PART = z.enum(['body', 'comments', 'transcript']);
@@ -71,6 +77,13 @@ export const FeedProfileSchema = z
       description:
         'The language briefs and translations are written in; null follows the interface language',
     }),
+    waitForHeat: z.boolean().meta({
+      description:
+        'A new, thin search result waits for its attention before it is let into the feed or left out',
+    }),
+    waitHours: z.number().int().meta({
+      description: 'How many hours after publication such a post waits',
+    }),
   })
   .meta({ ref: 'FeedProfile' });
 
@@ -99,6 +112,13 @@ export const SaveProfileBody = z.strictObject({
   readingLanguage: READING_LANGUAGE.nullable().optional().meta({
     description:
       'The language briefs and translations are written in; null follows the interface language',
+  }),
+  waitForHeat: z.boolean().optional().meta({
+    description:
+      'Let a new, thin search result wait for its attention (true) or decide it at once (false)',
+  }),
+  waitHours: z.number().int().min(1).max(48).optional().meta({
+    description: 'How many hours after publication such a post waits',
   }),
 });
 
@@ -340,11 +360,12 @@ export const ListItemsQuery = z.object({
       'saved',
       'later',
       'participated',
+      'filtered',
     ])
     .default('all')
     .meta({
       description:
-        'hot: recommended items getting attention now; solid: recommended items of high worth. all, hot, solid, discuss and learn leave out dismissed items; the personal views keep them',
+        'hot: recommended items getting attention now; solid: recommended items of high worth; filtered: items left out of the feed, with the reason in gate and uncertainty. all, hot, solid, discuss, learn and filtered leave out dismissed items; the personal views keep them',
     }),
   platform: PLATFORM.optional(),
   topicId: z.coerce.number().int().positive().optional(),
@@ -645,6 +666,7 @@ export const FeedSummarySchema = z
     saved: z.number().int(),
     later: z.number().int(),
     participated: z.number().int(),
+    filtered: z.number().int(),
     unread: z
       .object({
         all: z.number().int(),
@@ -655,6 +677,7 @@ export const FeedSummarySchema = z
         saved: z.number().int(),
         later: z.number().int(),
         participated: z.number().int(),
+        filtered: z.number().int(),
       })
       .meta({
         description: "How many of each view's items I have not read",

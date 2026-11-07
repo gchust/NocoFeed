@@ -70,6 +70,9 @@ const zhCN: AppResource = {
     gate: {
       prefilter: '预筛未通过',
       awaitingMaterial: '等待材料',
+      thin: '内容单薄且没有热度',
+      reply: '没有干货的回复',
+      watching: '新帖观察中',
     },
     views: {
       digest: '今日简报',
@@ -82,6 +85,7 @@ const zhCN: AppResource = {
       saved: '收藏',
       later: '稍后看',
       participated: '已参与',
+      filtered: '已过滤',
     },
     filters: {
       allPlatforms: '全部平台',
@@ -1076,6 +1080,8 @@ const zhCN: AppResource = {
       readerAgentId: '“重新分析”使用的 Runner 智能体',
       maxAgeDays: '只采集多久内发布的内容',
       readingLanguage: '阅读语言',
+      waitForHeat: '新帖先等热度再判断',
+      waitHours: '等待时长',
     },
     reading: {
       interface: '跟随界面语言',
@@ -1098,6 +1104,7 @@ const zhCN: AppResource = {
       days: '最近 {{count}} 天',
       unlimited: '不限',
     },
+    waitHoursValue: '发布后 {{count}} 小时',
     // 回复草稿的准则（`reply-guidelines.tsx`），与上面的表单分开保存。
     replies: {
       title: '参与风格',
@@ -1144,6 +1151,9 @@ const zhCN: AppResource = {
         '还没有启用的 Runner 智能体。管理员可在 系统设置 → 运行环境 和 智能体 中连接运行环境并启用智能体。',
       readingLanguage:
         'AI 摘要和翻译使用的语言。信息流里的内容会由 AI 模型自动生成摘要，外文标题一并译成这种语言；全文可在详情里按需翻译。自动摘要和分析分别计入每日模型调用上限。',
+      waitForHeat:
+        '主题搜索会搜到所有提到关键词的内容。没有方法、例子或数据的短帖，如果也几乎没人关注，就不进信息流（可在「已过滤」里看到原因）。打开后，刚发布的这类帖子会先观察，到时重新读取点赞和回复再决定；关闭则立即判断。无论哪种，之后变热都会自动放进来。',
+      waitHours: '发布后等多久再判断新的单薄帖子。',
     },
     ideas: {
       title: '点子',

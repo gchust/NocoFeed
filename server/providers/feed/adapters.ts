@@ -258,6 +258,7 @@ export function createAdapters(config: () => FeedConfig): Adapters {
             publishedAtApproximate: next.publishedAt
               ? next.publishedAtApproximate
               : merged.publishedAtApproximate,
+            metrics: next.metrics ?? merged.metrics,
             coverage: { ...merged.coverage, ...next.coverage },
           }),
           { status: 'ok', coverage: {} },
@@ -1294,6 +1295,7 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
           response.item?.publishedAtApproximate === true
             ? true
             : undefined,
+        metrics: cleanMetrics(response.item?.metrics),
         coverage: response.item?.coverage ?? {},
       };
     },
@@ -1327,6 +1329,19 @@ function createCollectorClient(config: () => FeedConfig, http: Http) {
       }
     },
   };
+}
+
+/** Counts a Collector sent with an enriched item: finite, non-negative numbers only; undefined when none. */
+function cleanMetrics(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    (entry): entry is [string, number] =>
+      typeof entry[1] === 'number' &&
+      Number.isFinite(entry[1]) &&
+      entry[1] >= 0 &&
+      entry[0].length <= 32,
+  );
+  return entries.length ? Object.fromEntries(entries.slice(0, 20)) : undefined;
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

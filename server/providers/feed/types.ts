@@ -159,6 +159,8 @@ export interface EnrichResult {
    * than "3 weeks ago" but not the exact time.
    */
   publishedAtApproximate?: boolean;
+  /** The post's counts as read with it; absent from Collectors that do not send them. */
+  metrics?: Record<string, number>;
   coverage: Partial<ItemCoverage>;
 }
 

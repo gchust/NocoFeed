@@ -79,6 +79,9 @@ const enUS = {
     gate: {
       prefilter: 'Stopped by the prefilter',
       awaitingMaterial: 'Waiting for material',
+      thin: 'Thin and unnoticed',
+      reply: 'Reply without substance',
+      watching: 'Watching: new post',
     },
     views: {
       label: 'Views',
@@ -91,6 +94,7 @@ const enUS = {
       saved: 'Saved',
       later: 'Later',
       participated: 'Joined',
+      filtered: 'Filtered',
     },
     filters: {
       allPlatforms: 'All platforms',
@@ -1143,6 +1147,8 @@ const enUS = {
       readerAgentId: 'Runner agent for “Analyse again”',
       maxAgeDays: 'Collect items from',
       readingLanguage: 'Reading language',
+      waitForHeat: 'Let new thin posts wait for attention',
+      waitHours: 'Wait for',
     },
     reading: {
       interface: 'Same as the interface',
@@ -1165,6 +1171,7 @@ const enUS = {
       days: 'The past {{count}} days',
       unlimited: 'Any time',
     },
+    waitHoursValue: '{{count}} hours after publication',
     // Rules for reply drafts (`reply-guidelines.tsx`), saved apart from the form above.
     replies: {
       title: 'Reply style',
@@ -1212,6 +1219,9 @@ const enUS = {
         'No runner agent is enabled. An administrator connects a runtime and enables agents under System settings → Runtimes and Agents.',
       readingLanguage:
         'The language of AI briefs and translations. Items in the feed get a brief from the AI model automatically, with foreign titles translated; the full text can be translated from the details. Briefs and analyses each count against the daily model limit.',
+      waitForHeat:
+        'A topic search finds anything that mentions its words. A short post with no method, example or data, which hardly anyone has noticed, stays out of the feed (see “Filtered”). When on, a post that new waits until its likes and replies can be read again; when off, it is decided at once. Either way it comes in if it turns hot.',
+      waitHours: 'Hours after publication before a new thin post is decided.',
     },
     ideas: {
       title: 'Ideas',
